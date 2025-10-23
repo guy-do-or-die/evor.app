@@ -4,6 +4,12 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      // Make vanish-effect use html2canvas-pro which supports oklch colors
+      'html2canvas': 'html2canvas-pro',
+    },
+  },
   server: {
     proxy: {
       '/hypersync/base-sepolia': {

@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAccount, useConnect, useDisconnect, useWalletClient, usePublicClient } from 'wagmi'
 import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
+import { Thanos } from 'vanish-effect'
 import EvorappLogo from './components/EvorappLogo'
+import './components/SnapEnhance.css'
 
 declare global {
   interface Window {
@@ -30,6 +32,8 @@ function App() {
   const [scanning, setScanning] = useState(false)
   const [currentChainId, setCurrentChainId] = useState<string>('')
   const [clearDelegationAfter, setClearDelegationAfter] = useState(true)
+  const [snapEffect, setSnapEffect] = useState(false)
+  const approvalsRef = useRef<HTMLDivElement>(null)
   
   // Check network on connect
   useEffect(() => {
@@ -415,8 +419,34 @@ function App() {
         
         const revokedCount = approvalPairs.length
         
-        // Clear the approval list immediately after successful revocation
-        setApprovalPairs([])
+        // Trigger Thanos snap effect before clearing
+        if (approvalsRef.current) {
+          // Lock container height to prevent scrollbar jump
+          const containerHeight = approvalsRef.current.offsetHeight
+          approvalsRef.current.style.setProperty('--container-height', `${containerHeight}px`)
+          
+          Thanos.snap(approvalsRef.current, {
+            duration: 2,
+            randomness: 0.7,
+            onComplete: () => {
+              // Single RAF for faster removal while still avoiding frame drop
+              requestAnimationFrame(() => {
+                setApprovalPairs([])
+                setSnapEffect(false)
+                // Reset height after clearing
+                if (approvalsRef.current) {
+                  approvalsRef.current.style.removeProperty('--container-height')
+                }
+              })
+            }
+          })
+          setSnapEffect(true)
+        } else {
+          setTimeout(() => {
+            setApprovalPairs([])
+            setSnapEffect(false)
+          }, 100)
+        }
         
         setStatus(`✅ Successfully revoked ${revokedCount} approvals! Cleaning up delegation...`)
         
@@ -438,6 +468,70 @@ function App() {
       setStatus(`❌ Error: ${error.shortMessage || error.message || 'Unknown error'}`)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const demoSnap = () => {
+    // Add mock approvals if list is empty
+    if (approvalPairs.length === 0) {
+      const mockApprovals = [
+        {
+          token: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          spender: '0x1234567890123456789012345678901234567890',
+          allowance: '115792089237316195423570985008687907853269984665640564039457584007913129639935',
+          tokenSymbol: 'USDC',
+          tokenName: 'USD Coin',
+          decimals: 6,
+          currentAllowance: '115792089237316195423570985008687907853269984665640564039457584007913129639935',
+        },
+        {
+          token: '0x4200000000000000000000000000000000000006',
+          spender: '0x0987654321098765432109876543210987654321',
+          allowance: '1000000000000000000',
+          tokenSymbol: 'WETH',
+          tokenName: 'Wrapped Ether',
+          decimals: 18,
+          currentAllowance: '1000000000000000000',
+        },
+        {
+          token: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',
+          spender: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+          allowance: '500000000000000000000',
+          tokenSymbol: 'DAI',
+          tokenName: 'Dai Stablecoin',
+          decimals: 18,
+          currentAllowance: '500000000000000000000',
+        },
+      ]
+      setApprovalPairs(mockApprovals as any)
+      setStatus('✅ Demo data loaded - Click again to see the snap effect!')
+    } else {
+      // Trigger snap effect
+      if (approvalsRef.current) {
+        setStatus('💥 Thanos snap activated!')
+        
+        // Lock container height to prevent scrollbar jump
+        const containerHeight = approvalsRef.current.offsetHeight
+        approvalsRef.current.style.setProperty('--container-height', `${containerHeight}px`)
+        
+        Thanos.snap(approvalsRef.current, {
+          duration: 3,
+          randomness: .9,
+          onComplete: () => {
+            // Immediate removal with single RAF
+            requestAnimationFrame(() => {
+              setApprovalPairs([])
+              setSnapEffect(false)
+              setStatus('✨ Approvals evaporated!')
+              // Reset height after clearing
+              if (approvalsRef.current) {
+                approvalsRef.current.style.removeProperty('--container-height')
+              }
+            })
+          }
+        })
+        setSnapEffect(true)
+      }
     }
   }
 
@@ -616,33 +710,43 @@ function App() {
                   <h2 className="text-2xl font-bold">Batch Revoke Approvals</h2>
                   <p className="text-gray-400 text-sm mt-2">Revoke multiple approvals in ONE transaction using EIP-7702</p>
                 </div>
-                <button
-                  onClick={scanApprovals}
-                  disabled={scanning || loading}
-                  className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition disabled:opacity-50 flex items-center gap-2"
-                >
-                  {scanning ? '🔍 Scanning...' : '🔍 Scan Approvals'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={demoSnap}
+                    disabled={loading}
+                    className="bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition disabled:opacity-50 flex items-center gap-2"
+                  >
+                    💥 Demo Snap
+                  </button>
+                  <button
+                    onClick={scanApprovals}
+                    disabled={scanning || loading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {scanning ? '🔍 Scanning...' : '🔍 Scan Approvals'}
+                  </button>
+                </div>
               </div>
               
               <div className="space-y-4">
                 {/* Approval Pairs */}
+                <div ref={approvalsRef} className="snap-particles-container space-y-3">
                 {approvalPairs.map((pair, index) => (
-                  <div key={index} className="bg-slate-900 rounded-lg p-4 space-y-3">
+                  <div key={index} className="bg-purple-500 rounded-lg p-4 space-y-3">
                     <div className="flex justify-between items-center mb-2">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-white">
                           {(pair as any).tokenSymbol || '???'}
                         </span>
                         {(pair as any).tokenName && (
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-white/90">
                             {(pair as any).tokenName}
                           </span>
                         )}
                       </div>
                       <div className="flex items-center gap-3">
                         {pair.allowance && (
-                          <span className="text-xs text-yellow-400 font-semibold">
+                          <span className="text-xs text-white font-semibold bg-black/20 px-2 py-1 rounded">
                             {BigInt(pair.allowance) > BigInt('1000000000000000000000000000') 
                               ? '♾️ Unlimited' 
                               : (() => {
@@ -655,7 +759,7 @@ function App() {
                         {approvalPairs.length > 1 && (
                           <button
                             onClick={() => setApprovalPairs(approvalPairs.filter((_, i) => i !== index))}
-                            className="text-red-400 hover:text-red-300 text-xs"
+                            className="text-white hover:text-white/80 text-xs bg-black/20 px-2 py-1 rounded"
                           >
                             Remove
                           </button>
@@ -663,7 +767,7 @@ function App() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Token Address</label>
+                      <label className="block text-xs text-white/90 font-semibold mb-1">Token Address</label>
                       <input
                         type="text"
                         value={pair.token}
@@ -672,23 +776,24 @@ function App() {
                           newPairs[index].token = e.target.value
                           setApprovalPairs(newPairs)
                         }}
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 font-mono text-xs focus:outline-none focus:border-blue-500"
+                        className="w-full bg-white/15 border border-white/20 rounded px-3 py-2 font-mono text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/40"
                         placeholder="0x..."
                         readOnly
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Spender Address</label>
+                      <label className="block text-xs text-white/90 font-semibold mb-1">Spender Address</label>
                       <input
                         type="text"
                         value={pair.spender}
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 font-mono text-xs focus:outline-none focus:border-blue-500"
+                        className="w-full bg-white/15 border border-white/20 rounded px-3 py-2 font-mono text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/40"
                         placeholder="0x..."
                         readOnly
                       />
                     </div>
                   </div>
                 ))}
+                </div>
 
                 {/* Security Option */}
                 <div className="flex items-center gap-3 p-4 bg-slate-900 rounded-lg">

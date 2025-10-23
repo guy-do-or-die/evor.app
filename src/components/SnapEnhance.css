@@ -1,0 +1,19 @@
+/* Enhance particle visibility - optimized for performance */
+.snap-particles-container canvas {
+  filter: brightness(1.2) saturate(1.2);
+  mix-blend-mode: screen;
+  will-change: transform, opacity;
+}
+
+.snap-particles-container {
+  position: relative;
+  contain: layout style paint;
+  /* Prevent height collapse during snap to avoid scrollbar jump */
+  min-height: var(--container-height, auto);
+  transition: min-height 0.3s ease-out;
+}
+
+/* Prevent scrollbar from causing layout shift */
+body {
+  overflow-y: scroll;
+}
