@@ -5,8 +5,16 @@ import "dotenv/config";
 
 const TEST_TOKEN = "0x3f1bfb16a75277d5826d195506b011a79fd9626e" as const;
 // Random addresses to use as spenders
-const SPENDER_A = "0x1111111111111111111111111111111111111111" as const;
-const SPENDER_B = "0x2222222222222222222222222222222222222222" as const;
+const SPENDERS = [
+  "0x1111111111111111111111111111111111111111",
+  "0x2222222222222222222222222222222222222222",
+  "0x3333333333333333333333333333333333333333",
+  "0x4444444444444444444444444444444444444444",
+  "0x5555555555555555555555555555555555555555",
+  "0x6666666666666666666666666666666666666666",
+  "0x7777777777777777777777777777777777777777",
+  "0x8888888888888888888888888888888888888888",
+] as const;
 
 async function main() {
   console.log("Creating test approvals...\n");
@@ -31,52 +39,45 @@ async function main() {
   ]);
 
   console.log(`Account: ${account.address}`);
-  console.log(`Token: ${TEST_TOKEN}\n`);
+  console.log(`Token: ${TEST_TOKEN}`);
+  console.log(`Creating ${SPENDERS.length} approvals...\n`);
 
-  // Approve SPENDER_A
-  console.log(`Approving ${SPENDER_A}...`);
-  const hash1 = await walletClient.writeContract({
-    address: TEST_TOKEN,
-    abi: erc20Abi,
-    functionName: "approve",
-    args: [SPENDER_A, 1000000000000000000n], // 1 token
-  });
-  await publicClient.waitForTransactionReceipt({ hash: hash1 });
-  console.log(`✅ Tx: ${hash1}`);
+  // Create approvals for all spenders
+  for (let i = 0; i < SPENDERS.length; i++) {
+    const spender = SPENDERS[i];
+    const amount = BigInt((i + 1) * 1000000000000000000); // 1, 2, 3, ... tokens
+    
+    console.log(`[${i + 1}/${SPENDERS.length}] Approving ${spender} for ${i + 1} tokens...`);
+    
+    try {
+      const hash = await walletClient.writeContract({
+        address: TEST_TOKEN,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [spender, amount],
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      console.log(`✅ Tx: ${hash}\n`);
+    } catch (error: any) {
+      console.error(`❌ Failed: ${error.message}\n`);
+    }
+  }
 
-  // Approve SPENDER_B
-  console.log(`Approving ${SPENDER_B}...`);
-  const hash2 = await walletClient.writeContract({
-    address: TEST_TOKEN,
-    abi: erc20Abi,
-    functionName: "approve",
-    args: [SPENDER_B, 2000000000000000000n], // 2 tokens
-  });
-  await publicClient.waitForTransactionReceipt({ hash: hash2 });
-  console.log(`✅ Tx: ${hash2}`);
+  // Check all allowances
+  console.log("📊 Current allowances:");
+  for (const spender of SPENDERS) {
+    const allowance = await publicClient.readContract({
+      address: TEST_TOKEN,
+      abi: erc20Abi,
+      functionName: "allowance",
+      args: [account.address, spender],
+    });
+    if (allowance > 0n) {
+      console.log(`  ${spender}: ${allowance.toString()}`);
+    }
+  }
 
-  // Check allowances
-  console.log("\n📊 Current allowances:");
-  const allowanceA = await publicClient.readContract({
-    address: TEST_TOKEN,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [account.address, SPENDER_A],
-  });
-  console.log(`  ${SPENDER_A}: ${allowanceA.toString()}`);
-
-  const allowanceB = await publicClient.readContract({
-    address: TEST_TOKEN,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [account.address, SPENDER_B],
-  });
-  console.log(`  ${SPENDER_B}: ${allowanceB.toString()}`);
-
-  console.log("\n✅ Test approvals created!");
-  console.log("\nUpdate your .env with:");
-  console.log(`TOKENS_CSV=${TEST_TOKEN},${TEST_TOKEN}`);
-  console.log(`SPENDERS_CSV=${SPENDER_A},${SPENDER_B}`);
+  console.log("\n✅ All test approvals created!");
 }
 
 main()

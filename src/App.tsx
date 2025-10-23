@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useWalletClient, usePublicClient } from 'wagmi'
-import { parseAbi, type Address, hexToSignature, numberToHex, createWalletClient, custom } from 'viem'
+import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
 import { baseSepolia } from 'wagmi/chains'
 
 declare global {
@@ -22,14 +22,12 @@ function App() {
     console.log('Wallet state:', { isConnected, address, hasWalletClient: !!walletClient, connector: connector?.name })
   }, [isConnected, address, walletClient, connector])
 
-  const [approvalPairs, setApprovalPairs] = useState([
-    { token: '0x3f1bfb16a75277d5826d195506b011a79fd9626e', spender: '0x1111111111111111111111111111111111111111' },
-    { token: '0x3f1bfb16a75277d5826d195506b011a79fd9626e', spender: '0x2222222222222222222222222222222222222222' },
-  ])
+  const [approvalPairs, setApprovalPairs] = useState<Array<{ token: string; spender: string; allowance?: string }>>([])
   const [status, setStatus] = useState('')
   const [txHash, setTxHash] = useState('')
   const [loading, setLoading] = useState(false)
   const [wrongNetwork, setWrongNetwork] = useState(false)
+  const [scanning, setScanning] = useState(false)
   
   // Check network on connect
   useEffect(() => {
@@ -48,6 +46,143 @@ function App() {
       })
     }
   }, [isConnected])
+
+  const scanApprovals = async () => {
+    if (!address || !publicClient) return
+    
+    setScanning(true)
+    setStatus('Scanning for approvals with HyperSync...')
+    
+    try {
+      console.log('Querying HyperSync REST API for Base Sepolia...')
+      
+      // ERC20 Approval event signature
+      const approvalTopic = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
+      // Owner address as topic (32 bytes with padding)
+      const ownerTopic = `0x000000000000000000000000${address.slice(2).toLowerCase()}`
+      
+      // Query HyperSync REST API
+      const query = {
+        from_block: 0,
+        logs: [{
+          topics: [
+            [approvalTopic], // topic0: Approval event signature
+            [ownerTopic],    // topic1: owner address (indexed)
+          ],
+        }],
+        field_selection: {
+          log: ['address', 'topic0', 'topic1', 'topic2', 'topic3', 'data'],
+        },
+      }
+      
+      console.log('Sending query to HyperSync...')
+      console.log('Query:', query)
+      console.log('API Token:', import.meta.env.VITE_HYPERSYNC_TOKEN ? 'Set' : 'Missing')
+      setStatus('Querying HyperSync...')
+      
+      const url = '/hypersync/query'
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_HYPERSYNC_TOKEN}`,
+      }
+      const body = JSON.stringify(query)
+      
+      console.log('Request URL:', url)
+      console.log('Request Headers:', headers)
+      console.log('Request Body:', body)
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body,
+      })
+      
+      console.log('Response status:', response.status)
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Error response:', errorText)
+        throw new Error(`HyperSync API error: ${response.status} - ${errorText}`)
+      }
+      
+      const data = await response.json()
+      console.log('HyperSync response:', data)
+      
+      // Flatten logs from all blocks
+      const allLogs: any[] = []
+      if (data.data && Array.isArray(data.data)) {
+        for (const block of data.data) {
+          if (block.logs && Array.isArray(block.logs)) {
+            allLogs.push(...block.logs)
+          }
+        }
+      }
+      
+      console.log(`Found ${allLogs.length} approval events`)
+      
+      // Parse unique token/spender pairs
+      const uniquePairs = new Map<string, { token: string; spender: string }>()
+      
+      for (const log of allLogs) {
+        const tokenAddress = log.address
+        // topic2 is the spender address (indexed parameter)
+        const spenderTopic = log.topic2
+        if (tokenAddress && spenderTopic) {
+          const spender = `0x${spenderTopic.slice(26)}` // Remove padding
+          const key = `${tokenAddress}-${spender}`
+          uniquePairs.set(key, { token: tokenAddress, spender })
+        }
+      }
+      
+      console.log(`Found ${uniquePairs.size} unique approval pairs, checking current allowances...`)
+      setStatus(`Checking ${uniquePairs.size} approvals...`)
+      
+      // Check current allowances
+      const erc20Abi = parseAbi(['function allowance(address owner, address spender) external view returns (uint256)'])
+      const activeApprovals: Array<{ token: string; spender: string; allowance: string }> = []
+      
+      for (const [, pair] of uniquePairs) {
+        try {
+          const allowance = await publicClient.readContract({
+            address: pair.token as Address,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, pair.spender as Address],
+          })
+          
+          if (allowance > 0n) {
+            activeApprovals.push({
+              ...pair,
+              allowance: allowance.toString(),
+            })
+            console.log(`Active: ${pair.token} → ${pair.spender}: ${allowance}`)
+          }
+        } catch (error) {
+          // Silently skip invalid tokens
+        }
+      }
+      
+      setApprovalPairs(activeApprovals)
+      setStatus(activeApprovals.length > 0 
+        ? `✅ Found ${activeApprovals.length} active approvals via HyperSync` 
+        : 'No active approvals found. Your account is clean! 🎉')
+      
+      console.log(`HyperSync scan complete: ${activeApprovals.length} active approvals`)
+      
+    } catch (error: any) {
+      console.error('Error scanning approvals:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        cause: error.cause
+      })
+      setStatus(`❌ Error scanning: ${error.message || 'Unknown error'}`)
+    } finally {
+      setScanning(false)
+    }
+  }
 
   const revokeApproval = async () => {
     console.log('Batch revoke clicked', { connector: !!connector, address, pairs: approvalPairs.length, isConnected })
@@ -284,8 +419,19 @@ function App() {
           <>
             {/* Batch Revoke Form */}
             <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-              <h2 className="text-2xl font-bold mb-4">Batch Revoke Approvals</h2>
-              <p className="text-gray-400 text-sm mb-6">Revoke multiple approvals in ONE transaction using EIP-7702</p>
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold">Batch Revoke Approvals</h2>
+                  <p className="text-gray-400 text-sm mt-2">Revoke multiple approvals in ONE transaction using EIP-7702</p>
+                </div>
+                <button
+                  onClick={scanApprovals}
+                  disabled={scanning || loading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  {scanning ? '🔍 Scanning...' : '🔍 Scan Approvals'}
+                </button>
+              </div>
               
               <div className="space-y-4">
                 {/* Approval Pairs */}
