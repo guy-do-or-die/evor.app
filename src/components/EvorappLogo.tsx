@@ -28,7 +28,13 @@ export default function EvorappLogo({ className = "", size = "md" }: EvorappLogo
       <div className="flipper">
         <div className="face front">
           {["a", "p", "p", "r", "o", "v", "e"].map((letter, i) => (
-            <span key={i} className="letter" style={{ color: letterColors[i] }}>
+            <span 
+              key={i} 
+              className="letter letter-animate" 
+              style={{ 
+                '--target-color': letterColors[i]
+              } as React.CSSProperties}
+            >
               {letter}
             </span>
           ))}

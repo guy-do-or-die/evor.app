@@ -38,29 +38,48 @@
   text-shadow: 0 0 4px currentColor, 0 0 8px currentColor;
 }
 
+.letter-animate {
+  animation: color-transition 8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes color-transition {
+  0% {
+    color: #ef4444; /* Start with red */
+  }
+  3% {
+    color: #ef4444; /* Hold red briefly */
+  }
+  15% {
+    color: var(--target-color); /* Gradual transition to rainbow */
+  }
+  88% {
+    color: var(--target-color); /* Hold rainbow color until flip back */
+  }
+  100% {
+    color: #ef4444; /* End with red */
+  }
+}
+
 .sub-flipper {
   position: relative;
   display: inline-flex;
   width: 3ch;
   height: 100%;
   transform-style: preserve-3d;
-  animation: sub-flip 8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation: sub-flip 8s cubic-bezier(0.22, 1, 0.36, 1) infinite
 }
 
 @keyframes main-flip {
   0% { 
     transform: rotateY(0deg);
   }
-  8% { 
+  7% { 
     transform: rotateY(0deg);
   }
-  12% {
+  15% {
     transform: rotateY(-90deg);
   }
-  16% { 
-    transform: rotateY(-180deg);
-  }
-  35% { 
+  20% { 
     transform: rotateY(-180deg);
   }
   88% { 
@@ -81,26 +100,71 @@
   0% { 
     transform: rotateY(0deg);
   }
-  35% { 
-    transform: rotateY(0deg);
+  9% { 
+    transform: rotateY(0deg); /* Start moving with main flip momentum */
   }
-  37% { 
-    transform: rotateY(-90deg);
+  10% { 
+    transform: rotateY(-360deg); /* Kick-off from abrupt stop - 1 full spin! */
   }
-  39% { 
-    transform: rotateY(-180deg);
+  11% { 
+    transform: rotateY(-1080deg); /* Massive acceleration: 3 spins */
+  }
+  12% { 
+    transform: rotateY(-1800deg); /* Still very fast: 5 spins */
+  }
+  13% { 
+    transform: rotateY(-2520deg); /* Fast: 7 spins */
+  }
+  14% { 
+    transform: rotateY(-3060deg); /* 8.5 spins */
+  }
+  15% { 
+    transform: rotateY(-3420deg); /* 9.5 spins */
+  }
+  16% { 
+    transform: rotateY(-3690deg); /* 10.25 spins */
+  }
+  17% { 
+    transform: rotateY(-3870deg); /* 10.75 spins */
+  }
+  18% { 
+    transform: rotateY(-4005deg); /* 11.125 spins */
+  }
+  19% { 
+    transform: rotateY(-4095deg); /* 11.375 spins */
+  }
+  20% { 
+    transform: rotateY(-4185deg); /* 11.625 spins */
+  }
+  21% { 
+    transform: rotateY(-4275deg); /* 11.875 spins */
+  }
+  22% { 
+    transform: rotateY(-4365deg); /* 12.125 spins */
+  }
+  23% { 
+    transform: rotateY(-4455deg); /* 12.375 spins */
+  }
+  24% { 
+    transform: rotateY(-4500deg); /* Settle on "app" (12.5 spins = 180deg equivalent) */
   }
   88% { 
-    transform: rotateY(-180deg);
+    transform: rotateY(-4500deg); /* Hold on "app" - stay stable */
   }
   92% {
-    transform: rotateY(-270deg);
+    transform: rotateY(-4500deg); /* Keep stable during main rotation back */
   }
   96% {
-    transform: rotateY(-360deg);
+    transform: rotateY(-4500deg); /* Still stable */
+  }
+  97% {
+    transform: rotateY(-4590deg); /* Quick flip after main completes */
+  }
+  98% {
+    transform: rotateY(-4680deg); /* Back to "ppa" (13 full spins = 0deg) */
   }
   100% { 
-    transform: rotateY(-360deg);
+    transform: rotateY(-4680deg);
   }
 }
 
