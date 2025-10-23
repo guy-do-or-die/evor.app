@@ -42,7 +42,7 @@ async function main() {
   console.log(`Token: ${TEST_TOKEN}`);
   console.log(`Creating ${SPENDERS.length} approvals...\n`);
 
-  // Create approvals for all spenders
+  // Create approvals for all spenders (one at a time with fresh nonces)
   for (let i = 0; i < SPENDERS.length; i++) {
     const spender = SPENDERS[i];
     const amount = BigInt((i + 1) * 1000000000000000000); // 1, 2, 3, ... tokens
@@ -50,16 +50,25 @@ async function main() {
     console.log(`[${i + 1}/${SPENDERS.length}] Approving ${spender} for ${i + 1} tokens...`);
     
     try {
+      // Get fresh nonce for each transaction to avoid conflicts
+      const nonce = await publicClient.getTransactionCount({ 
+        address: account.address,
+        blockTag: 'pending' // Include pending transactions
+      });
+      
       const hash = await walletClient.writeContract({
         address: TEST_TOKEN,
         abi: erc20Abi,
         functionName: "approve",
         args: [spender, amount],
+        nonce, // Explicitly set nonce
       });
+      
+      // Wait for confirmation before next transaction
       await publicClient.waitForTransactionReceipt({ hash });
       console.log(`✅ Tx: ${hash}\n`);
     } catch (error: any) {
-      console.error(`❌ Failed: ${error.message}\n`);
+      console.error(`❌ Failed: ${error.shortMessage || error.message}\n`);
     }
   }
 

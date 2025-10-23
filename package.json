@@ -14,6 +14,7 @@
     "demo": "hardhat run scripts/demo-eip7702.ts --network baseSepolia",
     "demo:batch": "hardhat run scripts/demo-batch.ts --network baseSepolia",
     "test:create-approvals": "hardhat run scripts/create-test-approvals.ts --network baseSepolia",
+    "test:check-approvals": "tsx scripts/check-approvals.ts --network baseSepolia",
     "test:revoke": "hardhat run scripts/eip7702-revoke.ts --network baseSepolia",
     "test:clear": "hardhat run scripts/eip7702-clear.ts --network baseSepolia",
     "test:simple-7702": "hardhat run scripts/test-simple-7702.ts --network baseSepolia",

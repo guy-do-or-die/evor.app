@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useWalletClient, usePublicClient } from 'wagmi'
 import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
-import { baseSepolia } from 'wagmi/chains'
 import EvorappLogo from './components/EvorappLogo'
 
 declare global {
@@ -30,6 +29,7 @@ function App() {
   const [wrongNetwork, setWrongNetwork] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [currentChainId, setCurrentChainId] = useState<string>('')
+  const [clearDelegationAfter, setClearDelegationAfter] = useState(true)
   
   // Check network on connect
   useEffect(() => {
@@ -196,18 +196,19 @@ function App() {
       
       console.log(`📊 Found ${activeApprovals.length} active approvals, skipped ${skippedCount} (revoked/dust)`)
       
-      // Fetch token symbols and decimals for better UX
-      setStatus(`Fetching token info for ${activeApprovals.length} tokens...`)
+      // Fetch token symbols, decimals, and VERIFY current allowances
+      setStatus(`Verifying ${activeApprovals.length} approvals on-chain...`)
       const erc20Abi = parseAbi([
         'function symbol() view returns (string)',
         'function name() view returns (string)',
         'function decimals() view returns (uint8)',
+        'function allowance(address owner, address spender) view returns (uint256)',
       ])
       
       const approvalsWithMetadata = await Promise.all(
         activeApprovals.map(async (approval) => {
           try {
-            const [symbol, name, decimals] = await Promise.all([
+            const [symbol, name, decimals, currentAllowance] = await Promise.all([
               publicClient.readContract({
                 address: approval.token as Address,
                 abi: erc20Abi,
@@ -222,7 +223,13 @@ function App() {
                 address: approval.token as Address,
                 abi: erc20Abi,
                 functionName: 'decimals',
-              }).catch(() => 18), // Default to 18 if call fails
+              }).catch(() => 18),
+              publicClient.readContract({
+                address: approval.token as Address,
+                abi: erc20Abi,
+                functionName: 'allowance',
+                args: [address, approval.spender as Address],
+              }).catch(() => 0n), // VERIFY current on-chain allowance
             ])
             
             return {
@@ -230,6 +237,7 @@ function App() {
               tokenSymbol: symbol,
               tokenName: name,
               decimals: Number(decimals),
+              currentAllowance: currentAllowance.toString(), // Verified on-chain value
             }
           } catch (error) {
             return {
@@ -237,29 +245,31 @@ function App() {
               tokenSymbol: '???',
               tokenName: 'Unknown Token',
               decimals: 18,
+              currentAllowance: '0',
             }
           }
         })
       )
       
-      setApprovalPairs(approvalsWithMetadata)
+      // Filter out approvals that have been revoked since the events  
+      const verifiedApprovals = approvalsWithMetadata.filter(approval => {
+        const currentAllowance = BigInt(approval.currentAllowance || '0')
+        return currentAllowance >= 100n // Use same threshold as initial filter
+      })
       
-      if (activeApprovals.length > 0) {
-        const totalTokens = activeApprovals.reduce((sum, approval) => {
-          const amount = BigInt(approval.allowance || '0')
-          return amount > BigInt('1000000000000000000000000000') ? sum : sum + amount
-        }, 0n)
-        const unlimitedCount = activeApprovals.filter(a => 
-          BigInt(a.allowance || '0') > BigInt('1000000000000000000000000000')
+      console.log(`✅ Verified: ${verifiedApprovals.length} still active, ${approvalsWithMetadata.length - verifiedApprovals.length} already revoked`)
+      
+      setApprovalPairs(verifiedApprovals)
+      
+      if (verifiedApprovals.length > 0) {
+        const unlimitedCount = verifiedApprovals.filter(a => 
+          BigInt(a.currentAllowance || '0') > BigInt('1000000000000000000000000000')
         ).length
         
-        const tokenDisplay = totalTokens > 0 
-          ? ` (${(Number(totalTokens) / 1e18).toLocaleString()} tokens${unlimitedCount > 0 ? ` + ${unlimitedCount} unlimited` : ''})`
-          : unlimitedCount > 0 ? ` (${unlimitedCount} unlimited)` : ''
-        
-        setStatus(`✅ Found ${activeApprovals.length} active approvals${tokenDisplay}`)
+        console.log(`Found ${verifiedApprovals.length} verified active approvals (${unlimitedCount} unlimited)`)
+        setStatus(`✅ Found ${verifiedApprovals.length} active approvals (${unlimitedCount} unlimited)`)
       } else {
-        setStatus('No active approvals found. Your account is clean! 🎉')
+        setStatus('✅ No active approvals found! Your wallet is clean.')
       }
       
     } catch (error: any) {
@@ -293,37 +303,14 @@ function App() {
         throw new Error('No ethereum provider found')
       }
       
-      // Check and switch to Base Sepolia if needed
+      // Check network - must be Base Mainnet or Sepolia
       setStatus('Checking network...')
       const chainId = await window.ethereum.request({ method: 'eth_chainId' })
       console.log('Current chain ID:', chainId)
       
-      if (chainId !== '0x14a34') { // Base Sepolia is 0x14a34 (84532 in decimal)
-        console.log('Switching to Base Sepolia...')
-        setStatus('Please switch to Base Sepolia in your wallet...')
-        
-        try {
-          await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0x14a34' }],
-          })
-        } catch (switchError: any) {
-          // Chain not added, try to add it
-          if (switchError.code === 4902) {
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: '0x14a34',
-                chainName: 'Base Sepolia',
-                nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-                rpcUrls: ['https://sepolia.base.org'],
-                blockExplorerUrls: ['https://sepolia.basescan.org'],
-              }],
-            })
-          } else {
-            throw switchError
-          }
-        }
+      const validChains = ['0x2105', '0x14a34'] // Base Mainnet, Base Sepolia
+      if (!validChains.includes(chainId)) {
+        throw new Error('Please switch to Base Mainnet or Base Sepolia in your wallet')
       }
       
       // Get current nonce
@@ -331,12 +318,16 @@ function App() {
       const nonce = await publicClient!.getTransactionCount({ address })
       console.log('Current nonce:', nonce)
       
+      // Get current chain ID
+      const currentChainId = chainId === '0x2105' ? 8453 : 84532 // Base Mainnet or Sepolia
+      
       // Create EIP-712 typed data for EIP-7702 authorization
       const typedData = {
         types: {
           EIP712Domain: [
             { name: 'name', type: 'string' },
             { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' },
           ],
           Authorization: [
             { name: 'chainId', type: 'uint256' },
@@ -348,9 +339,10 @@ function App() {
         domain: {
           name: 'EIP-7702',
           version: '1',
+          chainId: currentChainId,
         },
         message: {
-          chainId: baseSepolia.id,
+          chainId: currentChainId,
           address: EVOR_DELEGATE,
           nonce: Number(nonce),
         },
@@ -372,7 +364,7 @@ function App() {
       
       // Create authorization object
       const authorization = {
-        chainId: baseSepolia.id,
+        chainId: currentChainId,
         address: EVOR_DELEGATE,
         nonce,
         ...sig,
@@ -381,9 +373,12 @@ function App() {
       console.log('Authorization created:', authorization)
       setStatus('Sending revoke transaction...')
       
-      // Create wallet client
+      // Create wallet client with correct chain
+      const { base, baseSepolia: baseSepoliaChain } = await import('viem/chains')
+      const currentChain = chainId === '0x2105' ? base : baseSepoliaChain
+      
       const client = createWalletClient({
-        chain: baseSepolia,
+        chain: currentChain,
         transport: custom(window.ethereum),
       })
       
@@ -411,15 +406,96 @@ function App() {
       setStatus('Transaction sent! Waiting for confirmation...')
       
       if (publicClient) {
-        await publicClient.waitForTransactionReceipt({ hash })
-        setStatus(`✅ Successfully revoked ${approvalPairs.length} approvals in ONE transaction!`)
+        const receipt = await publicClient.waitForTransactionReceipt({ hash })
+        
+        // Check if transaction was successful
+        if (receipt.status === 'reverted') {
+          throw new Error('Transaction reverted - check approvals are still valid')
+        }
+        
+        const revokedCount = approvalPairs.length
+        
+        // Clear the approval list immediately after successful revocation
+        setApprovalPairs([])
+        
+        setStatus(`✅ Successfully revoked ${revokedCount} approvals! Cleaning up delegation...`)
+        
+        // Clear the EIP-7702 delegation for security (if enabled)
+        if (clearDelegationAfter) {
+          try {
+            await clearDelegation(client, address, currentChainId)
+            setStatus(`✅ Successfully revoked ${revokedCount} approvals and cleared delegation! Scan again to verify.`)
+          } catch (clearError: any) {
+            console.warn('Failed to clear delegation:', clearError)
+            setStatus(`✅ Revoked ${revokedCount} approvals! (Note: Failed to clear delegation - ${clearError.message || 'unknown error'})`)
+          }
+        } else {
+          setStatus(`✅ Successfully revoked ${revokedCount} approvals! (Delegation still active) Scan again to verify.`)
+        }
       }
     } catch (error: any) {
       console.error('Error revoking:', error)
-      setStatus(`❌ Error: ${error.shortMessage || error.message}`)
+      setStatus(`❌ Error: ${error.shortMessage || error.message || 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
+  }
+
+  const clearDelegation = async (client: any, address: Address, currentChainId: number) => {
+    // Get current nonce for clearing
+    const nonce = await publicClient!.getTransactionCount({ address })
+    
+    // Create authorization to clear delegation (set to address(0))
+    const clearTypedData = {
+      types: {
+        EIP712Domain: [
+          { name: 'name', type: 'string' },
+          { name: 'version', type: 'string' },
+          { name: 'chainId', type: 'uint256' },
+        ],
+        Authorization: [
+          { name: 'chainId', type: 'uint256' },
+          { name: 'address', type: 'address' },
+          { name: 'nonce', type: 'uint64' },
+        ],
+      },
+      primaryType: 'Authorization' as const,
+      domain: {
+        name: 'EIP-7702',
+        version: '1',
+        chainId: currentChainId,
+      },
+      message: {
+        chainId: currentChainId,
+        address: '0x0000000000000000000000000000000000000000', // Clear delegation
+        nonce: Number(nonce),
+      },
+    }
+    
+    // Sign the clear authorization
+    const signature = await window.ethereum.request({
+      method: 'eth_signTypedData_v4',
+      params: [address, JSON.stringify(clearTypedData)],
+    })
+    
+    const sig = hexToSignature(signature)
+    
+    const clearAuthorization = {
+      chainId: currentChainId,
+      address: '0x0000000000000000000000000000000000000000' as Address,
+      nonce,
+      ...sig,
+    }
+    
+    // Send empty transaction with clear authorization
+    const clearHash = await client.sendTransaction({
+      account: address,
+      to: address, // Send to self
+      value: 0n,
+      authorizationList: [clearAuthorization],
+    })
+    
+    await publicClient!.waitForTransactionReceipt({ hash: clearHash })
   }
 
   return (
@@ -613,6 +689,23 @@ function App() {
                     </div>
                   </div>
                 ))}
+
+                {/* Security Option */}
+                <div className="flex items-center gap-3 p-4 bg-slate-900 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="clearDelegation"
+                    checked={clearDelegationAfter}
+                    onChange={(e) => setClearDelegationAfter(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <label htmlFor="clearDelegation" className="text-sm text-gray-300 cursor-pointer">
+                    Clear delegation after revocation (recommended for security)
+                    <span className="block text-xs text-gray-500 mt-1">
+                      Adds 1 extra signature + ~$0.01 gas to restore account to normal state
+                    </span>
+                  </label>
+                </div>
 
                 {/* Revoke Button */}
                 <button
