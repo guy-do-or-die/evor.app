@@ -28,13 +28,16 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [wrongNetwork, setWrongNetwork] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [currentChainId, setCurrentChainId] = useState<string>('')
   
   // Check network on connect
   useEffect(() => {
     const checkNetwork = async () => {
       if (window.ethereum && isConnected) {
         const chainId = await window.ethereum.request({ method: 'eth_chainId' })
-        setWrongNetwork(chainId !== '0x14a34')
+        setCurrentChainId(chainId)
+        // Allow both Base mainnet (0x2105) and Base Sepolia (0x14a34)
+        setWrongNetwork(chainId !== '0x14a34' && chainId !== '0x2105')
       }
     }
     checkNetwork()
@@ -42,7 +45,8 @@ function App() {
     // Listen for network changes
     if (window.ethereum) {
       window.ethereum.on('chainChanged', (chainId: string) => {
-        setWrongNetwork(chainId !== '0x14a34')
+        setCurrentChainId(chainId)
+        setWrongNetwork(chainId !== '0x14a34' && chainId !== '0x2105')
       })
     }
   }, [isConnected])
@@ -54,7 +58,18 @@ function App() {
     setStatus('Scanning for approvals with HyperSync...')
     
     try {
-      console.log('Querying HyperSync REST API for Base Sepolia...')
+      // Get current chain ID directly from wallet to ensure it's up to date
+      const chainId = window.ethereum ? await window.ethereum.request({ method: 'eth_chainId' }) : currentChainId
+      
+      console.log('Current chain ID:', chainId, 'State chain ID:', currentChainId)
+      
+      // Determine network and HyperSync endpoint
+      const isMainnet = chainId === '0x2105'
+      const networkName = isMainnet ? 'Base Mainnet' : 'Base Sepolia'
+      const hypersyncPath = isMainnet ? '/hypersync/base/query' : '/hypersync/base-sepolia/query'
+      
+      console.log(`Querying HyperSync REST API for ${networkName}...`)
+      console.log(`Using endpoint: ${hypersyncPath}`)
       
       // ERC20 Approval event signature
       const approvalTopic = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
@@ -71,25 +86,21 @@ function App() {
           ],
         }],
         field_selection: {
-          log: ['address', 'topic0', 'topic1', 'topic2', 'topic3', 'data'],
+          block: ['number'],
+          log: ['address', 'topic0', 'topic1', 'topic2', 'topic3', 'data', 'log_index', 'transaction_index'],
+          transaction: ['transaction_index', 'block_number'],
         },
       }
       
-      console.log('Sending query to HyperSync...')
-      console.log('Query:', query)
-      console.log('API Token:', import.meta.env.VITE_HYPERSYNC_TOKEN ? 'Set' : 'Missing')
-      setStatus('Querying HyperSync...')
+      console.log(`🔍 Scanning ${networkName} for approvals...`)
+      setStatus(`Querying HyperSync on ${networkName}...`)
       
-      const url = '/hypersync/query'
+      const url = hypersyncPath
       const headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${import.meta.env.VITE_HYPERSYNC_TOKEN}`,
       }
       const body = JSON.stringify(query)
-      
-      console.log('Request URL:', url)
-      console.log('Request Headers:', headers)
-      console.log('Request Body:', body)
       
       const response = await fetch(url, {
         method: 'POST',
@@ -97,88 +108,162 @@ function App() {
         body,
       })
       
-      console.log('Response status:', response.status)
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
-      
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('Error response:', errorText)
+        console.error('❌ HyperSync API error:', response.status, errorText)
         throw new Error(`HyperSync API error: ${response.status} - ${errorText}`)
       }
       
       const data = await response.json()
-      console.log('HyperSync response:', data)
       
-      // Flatten logs from all blocks
+      // Flatten logs from all blocks and track block number for sorting
       const allLogs: any[] = []
       if (data.data && Array.isArray(data.data)) {
-        for (const block of data.data) {
-          if (block.logs && Array.isArray(block.logs)) {
-            allLogs.push(...block.logs)
+        for (const item of data.data) {
+          // HyperSync returns { logs: [...], blocks: [{number: ...}] }
+          const blockNumber = item.blocks && item.blocks[0] ? item.blocks[0].number : 0
+          
+          if (item.logs && Array.isArray(item.logs)) {
+            // Add block info to each log
+            for (const log of item.logs) {
+              allLogs.push({
+                ...log,
+                blockNumber,
+              })
+            }
           }
         }
       }
       
-      console.log(`Found ${allLogs.length} approval events`)
+      // Sort logs chronologically to get the most recent approval for each pair
+      allLogs.sort((a, b) => {
+        const blockDiff = (a.blockNumber || 0) - (b.blockNumber || 0)
+        if (blockDiff !== 0) return blockDiff
+        
+        const txDiff = (a.transaction_index || 0) - (b.transaction_index || 0)
+        if (txDiff !== 0) return txDiff
+        
+        return (a.log_index || 0) - (b.log_index || 0)
+      })
       
-      // Parse unique token/spender pairs
-      const uniquePairs = new Map<string, { token: string; spender: string }>()
+      console.log(`📝 Processing ${allLogs.length} approval events...`)
+      
+      // Parse token/spender pairs and get the MOST RECENT allowance from event data
+      const latestApprovals = new Map<string, { token: string; spender: string; allowance: bigint }>()
       
       for (const log of allLogs) {
         const tokenAddress = log.address
-        // topic2 is the spender address (indexed parameter)
         const spenderTopic = log.topic2
+        const allowanceHex = log.data
+        
         if (tokenAddress && spenderTopic) {
           const spender = `0x${spenderTopic.slice(26)}` // Remove padding
           const key = `${tokenAddress}-${spender}`
-          uniquePairs.set(key, { token: tokenAddress, spender })
-        }
-      }
-      
-      console.log(`Found ${uniquePairs.size} unique approval pairs, checking current allowances...`)
-      setStatus(`Checking ${uniquePairs.size} approvals...`)
-      
-      // Check current allowances
-      const erc20Abi = parseAbi(['function allowance(address owner, address spender) external view returns (uint256)'])
-      const activeApprovals: Array<{ token: string; spender: string; allowance: string }> = []
-      
-      for (const [, pair] of uniquePairs) {
-        try {
-          const allowance = await publicClient.readContract({
-            address: pair.token as Address,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [address, pair.spender as Address],
-          })
           
-          if (allowance > 0n) {
-            activeApprovals.push({
-              ...pair,
-              allowance: allowance.toString(),
-            })
-            console.log(`Active: ${pair.token} → ${pair.spender}: ${allowance}`)
+          try {
+            // Decode the allowance from hex (empty = 0 = revoked)
+            const allowance = allowanceHex && allowanceHex !== '0x' ? BigInt(allowanceHex) : 0n
+            // Store the latest approval (we're iterating chronologically)
+            latestApprovals.set(key, { token: tokenAddress, spender, allowance })
+          } catch (error) {
+            // If parsing fails, treat as 0 allowance (revoked)
+            latestApprovals.set(key, { token: tokenAddress, spender, allowance: 0n })
           }
-        } catch (error) {
-          // Silently skip invalid tokens
+        }
+      }
+      setStatus(`Processing ${latestApprovals.size} approvals...`)
+      
+      // Filter to only active approvals (allowance > 0)
+      // Note: We explicitly exclude 0 allowances (revoked approvals)
+      // Also filter out dust approvals (< 100 wei which are likely errors/spam)
+      const activeApprovals: Array<{ token: string; spender: string; allowance: string }> = []
+      let skippedCount = 0
+      const MIN_ALLOWANCE = 100n // Minimum 100 wei to be considered active
+      
+      for (const [, approval] of latestApprovals) {
+        // Only include if allowance is explicitly greater than dust threshold
+        if (approval.allowance >= MIN_ALLOWANCE) {
+          activeApprovals.push({
+            token: approval.token,
+            spender: approval.spender,
+            allowance: approval.allowance.toString(),
+          })
+        } else {
+          skippedCount++
         }
       }
       
-      setApprovalPairs(activeApprovals)
-      setStatus(activeApprovals.length > 0 
-        ? `✅ Found ${activeApprovals.length} active approvals via HyperSync` 
-        : 'No active approvals found. Your account is clean! 🎉')
+      console.log(`📊 Found ${activeApprovals.length} active approvals, skipped ${skippedCount} (revoked/dust)`)
       
-      console.log(`HyperSync scan complete: ${activeApprovals.length} active approvals`)
+      // Fetch token symbols and decimals for better UX
+      setStatus(`Fetching token info for ${activeApprovals.length} tokens...`)
+      const erc20Abi = parseAbi([
+        'function symbol() view returns (string)',
+        'function name() view returns (string)',
+        'function decimals() view returns (uint8)',
+      ])
+      
+      const approvalsWithMetadata = await Promise.all(
+        activeApprovals.map(async (approval) => {
+          try {
+            const [symbol, name, decimals] = await Promise.all([
+              publicClient.readContract({
+                address: approval.token as Address,
+                abi: erc20Abi,
+                functionName: 'symbol',
+              }).catch(() => '???'),
+              publicClient.readContract({
+                address: approval.token as Address,
+                abi: erc20Abi,
+                functionName: 'name',
+              }).catch(() => 'Unknown Token'),
+              publicClient.readContract({
+                address: approval.token as Address,
+                abi: erc20Abi,
+                functionName: 'decimals',
+              }).catch(() => 18), // Default to 18 if call fails
+            ])
+            
+            return {
+              ...approval,
+              tokenSymbol: symbol,
+              tokenName: name,
+              decimals: Number(decimals),
+            }
+          } catch (error) {
+            return {
+              ...approval,
+              tokenSymbol: '???',
+              tokenName: 'Unknown Token',
+              decimals: 18,
+            }
+          }
+        })
+      )
+      
+      setApprovalPairs(approvalsWithMetadata)
+      
+      if (activeApprovals.length > 0) {
+        const totalTokens = activeApprovals.reduce((sum, approval) => {
+          const amount = BigInt(approval.allowance || '0')
+          return amount > BigInt('1000000000000000000000000000') ? sum : sum + amount
+        }, 0n)
+        const unlimitedCount = activeApprovals.filter(a => 
+          BigInt(a.allowance || '0') > BigInt('1000000000000000000000000000')
+        ).length
+        
+        const tokenDisplay = totalTokens > 0 
+          ? ` (${(Number(totalTokens) / 1e18).toLocaleString()} tokens${unlimitedCount > 0 ? ` + ${unlimitedCount} unlimited` : ''})`
+          : unlimitedCount > 0 ? ` (${unlimitedCount} unlimited)` : ''
+        
+        setStatus(`✅ Found ${activeApprovals.length} active approvals${tokenDisplay}`)
+      } else {
+        setStatus('No active approvals found. Your account is clean! 🎉')
+      }
       
     } catch (error: any) {
-      console.error('Error scanning approvals:', error)
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        cause: error.cause
-      })
-      setStatus(`❌ Error scanning: ${error.message || 'Unknown error'}`)
+      console.error('❌ Error scanning approvals:', error.message)
+      setStatus(`❌ Error: ${error.message || 'Unknown error'}`)
     } finally {
       setScanning(false)
     }
@@ -353,33 +438,61 @@ function App() {
         {isConnected && wrongNetwork && (
           <div className="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6">
             <p className="text-red-300 font-semibold mb-2">⚠️ Wrong Network</p>
-            <p className="text-gray-300 text-sm mb-3">Please switch to Base Sepolia to continue</p>
-            <button
-              onClick={async () => {
-                try {
-                  await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: '0x14a34' }],
-                  })
-                } catch (error: any) {
-                  if (error.code === 4902) {
+            <p className="text-gray-300 text-sm mb-3">Please switch to Base Mainnet or Base Sepolia</p>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  try {
                     await window.ethereum.request({
-                      method: 'wallet_addEthereumChain',
-                      params: [{
-                        chainId: '0x14a34',
-                        chainName: 'Base Sepolia',
-                        nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-                        rpcUrls: ['https://sepolia.base.org'],
-                        blockExplorerUrls: ['https://sepolia.basescan.org'],
-                      }],
+                      method: 'wallet_switchEthereumChain',
+                      params: [{ chainId: '0x2105' }],
                     })
+                  } catch (error: any) {
+                    if (error.code === 4902) {
+                      await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                          chainId: '0x2105',
+                          chainName: 'Base',
+                          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                          rpcUrls: ['https://mainnet.base.org'],
+                          blockExplorerUrls: ['https://basescan.org'],
+                        }],
+                      })
+                    }
                   }
-                }
-              }}
-              className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition"
-            >
-              Switch to Base Sepolia
-            </button>
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition"
+              >
+                Switch to Base Mainnet
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await window.ethereum.request({
+                      method: 'wallet_switchEthereumChain',
+                      params: [{ chainId: '0x14a34' }],
+                    })
+                  } catch (error: any) {
+                    if (error.code === 4902) {
+                      await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                          chainId: '0x14a34',
+                          chainName: 'Base Sepolia',
+                          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                          rpcUrls: ['https://sepolia.base.org'],
+                          blockExplorerUrls: ['https://sepolia.basescan.org'],
+                        }],
+                      })
+                    }
+                  }
+                }}
+                className="bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition"
+              >
+                Switch to Base Sepolia
+              </button>
+            </div>
           </div>
         )}
 
@@ -403,7 +516,9 @@ function App() {
               <div>
                 <p className="text-sm text-gray-400">Connected</p>
                 <p className="font-mono text-sm">{address?.slice(0, 6)}...{address?.slice(-4)}</p>
-                <p className="text-xs text-blue-400 mt-1">Base Sepolia</p>
+                <p className="text-xs text-blue-400 mt-1">
+                  {currentChainId === '0x2105' ? 'Base Mainnet' : currentChainId === '0x14a34' ? 'Base Sepolia' : `Chain ${currentChainId}`}
+                </p>
               </div>
               <button
                 onClick={() => disconnect()}
@@ -438,15 +553,37 @@ function App() {
                 {approvalPairs.map((pair, index) => (
                   <div key={index} className="bg-slate-900 rounded-lg p-4 space-y-3">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-semibold text-gray-300">Approval #{index + 1}</span>
-                      {approvalPairs.length > 1 && (
-                        <button
-                          onClick={() => setApprovalPairs(approvalPairs.filter((_, i) => i !== index))}
-                          className="text-red-400 hover:text-red-300 text-xs"
-                        >
-                          Remove
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-white">
+                          {(pair as any).tokenSymbol || '???'}
+                        </span>
+                        {(pair as any).tokenName && (
+                          <span className="text-xs text-gray-500">
+                            {(pair as any).tokenName}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {pair.allowance && (
+                          <span className="text-xs text-yellow-400 font-semibold">
+                            {BigInt(pair.allowance) > BigInt('1000000000000000000000000000') 
+                              ? '♾️ Unlimited' 
+                              : (() => {
+                                  const decimals = (pair as any).decimals || 18
+                                  const amount = Number(pair.allowance) / Math.pow(10, decimals)
+                                  return `${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}`
+                                })()}
+                          </span>
+                        )}
+                        {approvalPairs.length > 1 && (
+                          <button
+                            onClick={() => setApprovalPairs(approvalPairs.filter((_, i) => i !== index))}
+                            className="text-red-400 hover:text-red-300 text-xs"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Token Address</label>
@@ -460,6 +597,7 @@ function App() {
                         }}
                         className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 font-mono text-xs focus:outline-none focus:border-blue-500"
                         placeholder="0x..."
+                        readOnly
                       />
                     </div>
                     <div>
@@ -467,25 +605,13 @@ function App() {
                       <input
                         type="text"
                         value={pair.spender}
-                        onChange={(e) => {
-                          const newPairs = [...approvalPairs]
-                          newPairs[index].spender = e.target.value
-                          setApprovalPairs(newPairs)
-                        }}
                         className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 font-mono text-xs focus:outline-none focus:border-blue-500"
                         placeholder="0x..."
+                        readOnly
                       />
                     </div>
                   </div>
                 ))}
-
-                {/* Add More Button */}
-                <button
-                  onClick={() => setApprovalPairs([...approvalPairs, { token: '0x', spender: '0x' }])}
-                  className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 px-4 rounded-lg text-sm transition"
-                >
-                  + Add Another Approval
-                </button>
 
                 {/* Revoke Button */}
                 <button
