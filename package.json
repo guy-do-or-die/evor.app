@@ -7,7 +7,18 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "compile": "hardhat compile",
+    "deploy:base": "hardhat run scripts/deploy-evor-delegate.ts --network baseSepolia",
+    "deploy:sepolia": "hardhat run scripts/deploy-sepolia.ts --network sepolia",
+    "demo": "hardhat run scripts/demo-eip7702.ts --network baseSepolia",
+    "demo:batch": "hardhat run scripts/demo-batch.ts --network baseSepolia",
+    "test:create-approvals": "hardhat run scripts/create-test-approvals.ts --network baseSepolia",
+    "test:revoke": "hardhat run scripts/eip7702-revoke.ts --network baseSepolia",
+    "test:clear": "hardhat run scripts/eip7702-clear.ts --network baseSepolia",
+    "test:simple-7702": "hardhat run scripts/test-simple-7702.ts --network baseSepolia",
+    "test:base-7702": "hardhat run scripts/test-base-7702.ts --network baseSepolia",
+    "test:sepolia": "hardhat run scripts/test-sepolia-7702.ts --network sepolia"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.5",
