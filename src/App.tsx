@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useWalletClient, usePublicClient } from 'wagmi'
 import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
 import { baseSepolia } from 'wagmi/chains'
+import EvorappLogo from './components/EvorappLogo'
 
 declare global {
   interface Window {
@@ -426,11 +427,11 @@ function App() {
       <div className="container mx-auto px-4 py-12 max-w-2xl">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            evor.app
-          </h1>
+          <div className="flex justify-center mb-4">
+            <EvorappLogo size="lg" />
+          </div>
           <p className="text-gray-400 text-lg">
-            Revoke token approvals using EIP-7702
+            Evor-porate all approvals in a click
           </p>
         </div>
 
