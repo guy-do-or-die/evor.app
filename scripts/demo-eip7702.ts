@@ -95,6 +95,9 @@ async function main() {
   console.log(`  ⛽ Gas used: ${receipt.gasUsed}`);
   console.log(`  📋 Events emitted: ${receipt.logs.length}\n`);
 
+  // Small delay to ensure state is propagated
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
   // Verify result
   const afterAllowance = await publicClient.readContract({
     address: TEST_TOKEN,
