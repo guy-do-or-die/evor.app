@@ -1,21 +1,14 @@
 import { useState, useEffect } from 'react'
+import { type Chain } from 'viem/chains'
 import { 
-  mainnet, sepolia,
-  base, baseSepolia, 
-  optimism, optimismSepolia, 
-  arbitrum, arbitrumSepolia,
-  polygon, polygonAmoy,
-  bsc, bscTestnet,
-  type Chain 
-} from 'viem/chains'
+  SUPPORTED_CHAINS, 
+  getChainConfig as getCentralChainConfig, 
+  getChainConfigById,
+  getHypersyncEndpoint as getHypersyncEndpointHelper,
+  type SupportedChainKey 
+} from '../config/chains'
 
-export type SupportedChain = 
-  | 'mainnet' | 'sepolia'
-  | 'base' | 'base-sepolia'
-  | 'optimism' | 'optimism-sepolia'
-  | 'arbitrum' | 'arbitrum-sepolia'
-  | 'polygon' | 'polygon-amoy'
-  | 'bsc' | 'bsc-testnet'
+export type SupportedChain = SupportedChainKey
 
 interface ChainConfig {
   chain: Chain
@@ -26,92 +19,21 @@ interface ChainConfig {
 
 // Get HyperSync endpoint based on environment
 export function getHypersyncEndpoint(chainKey: SupportedChain): string {
-  // In production, use serverless function to hide token
-  if (import.meta.env.PROD) {
-    return `/api/hypersync?chain=${chainKey.replace('-sepolia', '-sepolia').replace('mainnet', 'eth')}`
-  }
-  
-  // In dev, use Vite proxy (token in .env.local is OK for dev)
-  return CHAIN_CONFIGS[chainKey].hypersyncPath
+  return getHypersyncEndpointHelper(chainKey, import.meta.env.DEV)
 }
 
-export const CHAIN_CONFIGS: Record<SupportedChain, ChainConfig> = {
-  // Mainnets
-  'mainnet': {
-    chain: mainnet,
-    hypersyncPath: '/hypersync/eth/query',
-    category: 'mainnet',
-    scanningSupported: true
-  },
-  'base': {
-    chain: base,
-    hypersyncPath: '/hypersync/base/query',
-    category: 'mainnet',
-    scanningSupported: true
-  },
-  'optimism': {
-    chain: optimism,
-    hypersyncPath: '/hypersync/optimism/query',
-    category: 'mainnet',
-    scanningSupported: true
-  },
-  'arbitrum': {
-    chain: arbitrum,
-    hypersyncPath: '/hypersync/arbitrum/query',
-    category: 'mainnet',
-    scanningSupported: true
-  },
-  'polygon': {
-    chain: polygon,
-    hypersyncPath: '/hypersync/polygon/query',
-    category: 'mainnet',
-    scanningSupported: true
-  },
-  'bsc': {
-    chain: bsc,
-    hypersyncPath: '/hypersync/bsc/query',
-    category: 'mainnet',
-    scanningSupported: true
-  },
-  
-  // Testnets
-  'sepolia': {
-    chain: sepolia,
-    hypersyncPath: '/hypersync/sepolia/query',
-    category: 'testnet',
-    scanningSupported: true
-  },
-  'base-sepolia': {
-    chain: baseSepolia,
-    hypersyncPath: '/hypersync/base-sepolia/query',
-    category: 'testnet',
-    scanningSupported: false // HyperSync doesn't support base-sepolia yet
-  },
-  'optimism-sepolia': {
-    chain: optimismSepolia,
-    hypersyncPath: '/hypersync/optimism-sepolia/query',
-    category: 'testnet',
-    scanningSupported: true
-  },
-  'arbitrum-sepolia': {
-    chain: arbitrumSepolia,
-    hypersyncPath: '/hypersync/arbitrum-sepolia/query',
-    category: 'testnet',
-    scanningSupported: true
-  },
-  'polygon-amoy': {
-    chain: polygonAmoy,
-    hypersyncPath: '/hypersync/polygon-amoy/query',
-    category: 'testnet',
-    scanningSupported: true
-  },
-  'bsc-testnet': {
-    chain: bscTestnet,
-    hypersyncPath: '/hypersync/bsc-testnet/query',
-    category: 'testnet',
-    scanningSupported: true
-  }
-}
+// Convert centralized config to legacy format for compatibility
+export const CHAIN_CONFIGS: Record<SupportedChain, ChainConfig> = Object.fromEntries(
+  SUPPORTED_CHAINS.map(({ key, chain, category, scanningSupported }) => [
+    key,
+    {
+      chain,
+      hypersyncPath: `/hypersync/${key}/query`,
+      category,
+      scanningSupported
+    }
+  ])
+) as Record<SupportedChain, ChainConfig>
 
 // Helper to get chain properties
 export const getChainConfig = (chainKey: SupportedChain) => {
@@ -142,12 +64,11 @@ export function useNetwork() {
         const validChainIds = Object.keys(CHAIN_CONFIGS).map(k => getChainConfig(k as SupportedChain).chainIdHex)
         setWrongNetwork(!validChainIds.includes(chainId))
         
-        // Auto-select matching chain
-        const matchingChain = Object.keys(CHAIN_CONFIGS).find(
-          (key) => getChainConfig(key as SupportedChain).chainIdHex === chainId
-        )
-        if (matchingChain) {
-          setSelectedChain(matchingChain as SupportedChain)
+        // Auto-select matching chain using centralized config
+        const chainIdNum = parseInt(chainId, 16)
+        const config = getChainConfigById(chainIdNum)
+        if (config) {
+          setSelectedChain(config.key as SupportedChain)
         }
       }
     }
@@ -160,11 +81,11 @@ export function useNetwork() {
         const validChainIds = Object.keys(CHAIN_CONFIGS).map(k => getChainConfig(k as SupportedChain).chainIdHex)
         setWrongNetwork(!validChainIds.includes(chainId))
         
-        const matchingChain = Object.keys(CHAIN_CONFIGS).find(
-          (key) => getChainConfig(key as SupportedChain).chainIdHex === chainId
-        )
-        if (matchingChain) {
-          setSelectedChain(matchingChain as SupportedChain)
+        // Auto-select matching chain using centralized config
+        const chainIdNum = parseInt(chainId, 16)
+        const config = getChainConfigById(chainIdNum)
+        if (config) {
+          setSelectedChain(config.key as SupportedChain)
         }
       }
       
@@ -198,11 +119,13 @@ export function useNetwork() {
     }
   }
 
+  const chainConfig = getChainConfig(selectedChain)
+
   return {
     currentChainId,
     selectedChain,
     wrongNetwork,
-    chainConfig: getChainConfig(selectedChain),
+    chainConfig,
     switchChain,
     setSelectedChain
   }

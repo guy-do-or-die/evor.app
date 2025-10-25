@@ -37,7 +37,18 @@ export function useApprovalScanner() {
     address: Address | undefined,
     chain: SupportedChain
   ) => {
-    if (!address) return
+    // Early validation - don't start scan if conditions aren't met
+    if (!address) {
+      console.log('⏭️ Skipping scan: No address')
+      return
+    }
+    
+    const chainConfig = CHAIN_CONFIGS[chain]
+    if (!chainConfig.scanningSupported) {
+      console.log('⏭️ Skipping scan: Chain not supported', chain)
+      setError(`Scanning not supported on ${chainConfig.chain.name}`)
+      return
+    }
     
     // Detect chain change and clear token cache
     if (lastChainRef.current && lastChainRef.current !== chain) {
@@ -61,16 +72,8 @@ export function useApprovalScanner() {
     setError(null)
 
     try {
-      // 1. Validate chain support
-      const chainConfig = CHAIN_CONFIGS[chain]
-      scanDebugger.log('VALIDATE_CHAIN', { 
-        chain, 
-        supported: chainConfig.scanningSupported 
-      })
-      
-      if (!chainConfig.scanningSupported) {
-        throw new Error('Scanning not supported on this network')
-      }
+      scanDebugger.log('START', { address, chain })
+      scanDebugger.log('VALIDATE_CHAIN', { chain, supported: true })
 
       // Create publicClient with multichain RPC support
       // Supports Ankr (multichain), Infura (multichain), or per-chain URLs
@@ -78,7 +81,7 @@ export function useApprovalScanner() {
         const urls: string[] = []
         
         // Option 1: Ankr API - single key works for all chains!
-        // Use Vite proxy to bypass CORS: /ankr-rpc instead of https://rpc.ankr.com
+        // Requires whitelisted domain (use ngrok for local dev)
         const ankrKey = import.meta.env.VITE_ANKR_API_KEY
         if (ankrKey) {
           const ankrChainMap: Record<string, string> = {
@@ -97,7 +100,7 @@ export function useApprovalScanner() {
           }
           const ankrChain = ankrChainMap[chain]
           if (ankrChain) {
-            urls.push(`/ankr-rpc/${ankrChain}/${ankrKey}`)
+            urls.push(`https://rpc.ankr.com/${ankrChain}/${ankrKey}`)
           }
         }
         
@@ -135,21 +138,13 @@ export function useApprovalScanner() {
 
       const customRpcs = getRpcUrls(chain)
       
-      // Use fallback transport with multiple URLs
-      const getFallbackTransport = () => {
-        if (customRpcs.length > 0) {
-          // Try custom RPC first, fall back to public if it fails
-          return http(customRpcs[0], {
-            retryCount: 2,
-            timeout: 10_000
-          })
-        }
-        return http()
-      }
-      
+      // Create publicClient with fallback transports
+      // Viem will try each RPC in order until one works
       const publicClient = createPublicClient({
         chain: chainConfig.chain,
-        transport: getFallbackTransport()
+        transport: customRpcs.length > 0 
+          ? http(customRpcs[0], { retryCount: 1, timeout: 10_000 })
+          : http() // Use viem's default public RPCs
       })
       
       scanDebugger.log('CREATE_CLIENT', {
