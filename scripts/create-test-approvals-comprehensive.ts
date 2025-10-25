@@ -264,7 +264,7 @@ async function main() {
   console.log("🪙 ERC20 Approvals:");
   let erc20Count = 0;
   for (const [name, tokenAddress] of tokenEntries) {
-    for (const spender of SPENDERS.slice(0, 5)) {
+    for (const spender of SPENDERS.slice(0, 6)) { // Check all 6 spenders including PERMIT2
       try {
         const allowance = await publicClient.readContract({
           address: tokenAddress as `0x${string}`,

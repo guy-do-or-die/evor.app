@@ -56,6 +56,7 @@ export async function fetchApprovalEvents(
   
   const query = {
     from_block: 0,
+    // Don't specify to_block to get latest available data
     logs: [
       // ERC20 Approval events
       {
@@ -193,9 +194,9 @@ export function parseApprovalLogs(logs: HyperSyncLog[]): ParsedApproval[] {
     }
   }
 
-  // Filter out zero/negligible allowances for ERC20, but keep all NFT approvals
+  // Don't filter here - we need to check current on-chain allowances first
+  // Filtering happens later in enrichment after checking actual state
   return Array.from(latestMap.values())
-    .filter(a => a.tokenType !== 'ERC20' || a.allowance >= MIN_ALLOWANCE)
 }
 
 // ============================================================================

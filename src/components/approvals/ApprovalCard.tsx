@@ -29,7 +29,9 @@ export function ApprovalCard({ approval, index = 0, onRemove, showRemove }: Appr
     return colors[idx % colors.length]
   }
   
-  const isUnlimited = BigInt(approval.allowance || '0') > BigInt('1000000000000000000000000000')
+  // NFT approvals (ApprovalForAll) should always show infinity
+  const isNFTApproval = approval.tokenType === 'ERC721' || approval.tokenType === 'ERC1155'
+  const isUnlimited = isNFTApproval || BigInt(approval.allowance || '0') > BigInt('1000000000000000000000000000')
   
   const formatAllowance = () => {
     if (isUnlimited) return null // Will render icon instead
