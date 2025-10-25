@@ -22,15 +22,15 @@ export function WalletConnection({ selectedChain, onChainChange, wrongNetwork }:
         <div className="text-center space-y-4">
           <Wallet className="w-12 h-12 mx-auto text-muted-foreground" />
           <p className="text-sm sm:text-base text-muted-foreground">Connect your wallet to scan approvals</p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 max-w-xs mx-auto">
             {connectors.map((connector) => (
               <Button
                 key={connector.id}
                 onClick={() => connect({ connector })}
-                className="w-full"
+                className="w-full bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-400/30 hover:border-blue-400/50"
                 size="lg"
               >
-                Connect {connector.name}
+                {connector.name}
               </Button>
             ))}
           </div>

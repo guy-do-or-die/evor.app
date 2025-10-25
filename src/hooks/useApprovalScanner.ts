@@ -7,12 +7,15 @@ import {
   parseApprovalLogs,
   fetchTokenMetadata,
   fetchCurrentAllowances,
+  detectNFTTypes,
   enrichApprovals,
   sortApprovalsByRisk,
   calculateStats,
 } from '../services/approvalScanner'
 import { getCachedToken, clearTokenCache } from '../utils/tokenCache'
 import { scanDebugger } from '../utils/scanDebugger'
+
+export type TokenType = 'ERC20' | 'ERC721' | 'ERC1155'
 
 export interface Approval {
   token: string
@@ -24,6 +27,7 @@ export interface Approval {
   currentAllowance?: string
   isActive?: boolean
   isPermit2?: boolean
+  tokenType: TokenType
 }
 
 export function useApprovalScanner() {
@@ -203,7 +207,19 @@ export function useApprovalScanner() {
         note: 'Multicalls split into chunks of 50 to avoid RPC limits' 
       })
 
-      // 5. Check current on-chain allowances
+      // 5. Detect NFT types (ERC721 vs ERC1155)
+      scanDebugger.log('DETECT_NFT_TYPES_START', {
+        nftTokens: parsedApprovals.filter(a => a.tokenType !== 'ERC20').length
+      })
+      
+      await detectNFTTypes(parsedApprovals, publicClient)
+      
+      scanDebugger.log('DETECT_NFT_TYPES_END', {
+        erc721Count: parsedApprovals.filter(a => a.tokenType === 'ERC721').length,
+        erc1155Count: parsedApprovals.filter(a => a.tokenType === 'ERC1155').length,
+      })
+
+      // 7. Check current on-chain allowances
       scanDebugger.log('FETCH_ALLOWANCES_START', {
         approvalsToCheck: parsedApprovals.length
       })
@@ -218,7 +234,7 @@ export function useApprovalScanner() {
         }))
       })
 
-      // 6. Enrich with metadata and current state
+      // 8. Enrich with metadata and current state
       const enriched = enrichApprovals(parsedApprovals, currentAllowances)
       
       scanDebugger.log('ENRICH', {

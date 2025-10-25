@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
+import { useAccount, usePublicClient } from 'wagmi'
 import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
 import { Thanos } from 'vanish-effect'
-import { ExternalLink, ShieldX, ChevronUp, ChevronDown } from 'lucide-react'
+import { ExternalLink, Sparkles, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react'
 import EvorappLogo from './components/EvorappLogo'
 import { WalletConnection } from './components/wallet/WalletConnection'
 import { ApprovalsList } from './components/approvals/ApprovalsList'
@@ -13,7 +13,12 @@ import { useNetwork, CHAIN_CONFIGS } from './hooks/useNetwork'
 import { useApprovalScanner } from './hooks/useApprovalScanner'
 import './components/SnapEnhance.css'
 
-const EVOR_DELEGATE = '0x430cae04bdfc596be0ca98b46279c3babf080620' as const
+// EvorDelegate addresses per network
+const EVOR_DELEGATES = {
+  8453: '0x0b515dec9f25c46a047c4819f0119ec77e3765ce', // Base Mainnet
+  84532: '0x430cae04bdfc596be0ca98b46279c3babf080620', // Base Sepolia
+  11155111: '0x430cae04bdfc596be0ca98b46279c3babf080620', // Sepolia (placeholder)
+} as const
 
 function App() {
   const { address, isConnected } = useAccount()
@@ -54,6 +59,16 @@ function App() {
       return
     }
     
+    // Check wallet compatibility
+    const isMetaMask = window.ethereum.isMetaMask && !window.ethereum.isRabby
+    const isRabby = window.ethereum.isRabby
+    
+    if (isMetaMask) {
+      setStatus('⚠️ MetaMask has limited EIP-7702 support. For best experience, use Rabby wallet.')
+      // Add small delay so users can see the warning
+      await new Promise(resolve => setTimeout(resolve, 2000))
+    }
+    
     setLoading(true)
     setStatus('Signing EIP-7702 authorization...')
     setTxHash('')
@@ -62,6 +77,12 @@ function App() {
       const nonce = await publicClient!.getTransactionCount({ address })
       
       // Create EIP-7702 authorization
+      // Get the correct EvorDelegate address for this network
+      const evorDelegate = EVOR_DELEGATES[chainConfig.chainId as keyof typeof EVOR_DELEGATES]
+      if (!evorDelegate) {
+        throw new Error(`EvorDelegate not deployed on chain ${chainConfig.chainId}`)
+      }
+
       const typedData = {
         types: {
           EIP712Domain: [
@@ -83,7 +104,7 @@ function App() {
         },
         message: {
           chainId: chainConfig.chainId,
-          address: EVOR_DELEGATE,
+          address: evorDelegate,
           nonce: Number(nonce),
         },
       }
@@ -97,8 +118,8 @@ function App() {
       const sig = hexToSignature(signature)
       const authorization = {
         chainId: chainConfig.chainId,
-        address: EVOR_DELEGATE,
-        nonce,
+        address: evorDelegate,
+        nonce: Number(nonce),
         ...sig,
       }
       
@@ -109,21 +130,105 @@ function App() {
         transport: custom(window.ethereum),
       })
       
+      // Separate ERC20 and NFT approvals
+      const erc20Approvals = approvals.filter(a => a.tokenType === 'ERC20')
+      const nftApprovals = approvals.filter(a => a.tokenType === 'ERC721' || a.tokenType === 'ERC1155')
+      
       const evorAbi = parseAbi([
         'function revokeERC20(address[] tokens, address[] spenders) external',
+        'function revokeForAll(address[] collections, address[] operators) external',
       ])
       
-      const tokens = approvals.map(p => p.token as Address)
-      const spenders = approvals.map(p => p.spender as Address)
+      let hash: Address
       
-      const hash = await client.writeContract({
-        account: address,
-        abi: evorAbi,
-        address: address,
-        authorizationList: [authorization],
-        functionName: 'revokeERC20',
-        args: [tokens, spenders],
-      })
+      // Revoke based on what types we have
+      if (erc20Approvals.length > 0 && nftApprovals.length === 0) {
+        // Only ERC20
+        const tokens = erc20Approvals.map(p => p.token as Address)
+        const spenders = erc20Approvals.map(p => p.spender as Address)
+        
+        hash = await client.writeContract({
+          account: address,
+          abi: evorAbi,
+          address: address,
+          authorizationList: [authorization],
+          functionName: 'revokeERC20',
+          args: [tokens, spenders],
+        })
+      } else if (nftApprovals.length > 0 && erc20Approvals.length === 0) {
+        // Only NFTs
+        const collections = nftApprovals.map(p => p.token as Address)
+        const operators = nftApprovals.map(p => p.spender as Address)
+        
+        hash = await client.writeContract({
+          account: address,
+          abi: evorAbi,
+          address: address,
+          authorizationList: [authorization],
+          functionName: 'revokeForAll',
+          args: [collections, operators],
+        })
+      } else {
+        // Mixed - revoke ERC20 first, then NFTs with a new authorization
+        setStatus('Revoking ERC20 approvals...')
+        
+        const tokens = erc20Approvals.map(p => p.token as Address)
+        const spenders = erc20Approvals.map(p => p.spender as Address)
+        
+        const erc20Hash = await client.writeContract({
+          account: address,
+          abi: evorAbi,
+          address: address,
+          authorizationList: [authorization],
+          functionName: 'revokeERC20',
+          args: [tokens, spenders],
+        })
+        
+        setStatus('Waiting for ERC20 revocation...')
+        if (publicClient) {
+          await publicClient.waitForTransactionReceipt({ hash: erc20Hash })
+        }
+        
+        // Sign a new authorization for NFT revocation (new nonce)
+        setStatus('Signing authorization for NFT revocation...')
+        const nonce2 = await publicClient!.getTransactionCount({ address })
+        
+        const typedData2 = {
+          ...typedData,
+          message: {
+            chainId: chainConfig.chainId,
+            address: evorDelegate,
+            nonce: Number(nonce2),
+          },
+        }
+        
+        const signature2 = await window.ethereum.request({
+          method: 'eth_signTypedData_v4',
+          params: [address, JSON.stringify(typedData2)],
+        })
+        
+        const sig2 = hexToSignature(signature2 as `0x${string}`)
+        const authorization2 = {
+          chainId: chainConfig.chainId,
+          address: evorDelegate,
+          nonce: Number(nonce2),
+          ...sig2,
+        }
+        
+        setStatus('Revoking NFT approvals...')
+        
+        const collections = nftApprovals.map(p => p.token as Address)
+        const operators = nftApprovals.map(p => p.spender as Address)
+        
+        hash = await client.writeContract({
+          account: address,
+          abi: evorAbi,
+          address: address,
+          authorizationList: [authorization2],
+          functionName: 'revokeForAll',
+          args: [collections, operators],
+        })
+      }
       
       setTxHash(hash)
       setStatus('Waiting for confirmation...')
@@ -143,8 +248,9 @@ function App() {
           
           Thanos.snap(approvalsRef.current, {
             duration: 2,
-            randomness: 0.9,
-            particleDensity: 5,
+            direction: 'up',
+            randomness: 0.95,
+            particleDensity: 10,
             onComplete: () => {
               setSnapEffect(false)
               setApprovals([])
@@ -256,25 +362,37 @@ function App() {
 
         {/* Notification Area - Always visible to prevent layout shifts */}
         {isConnected && !wrongNetwork && (
-          <Card className="mb-4 p-3 bg-muted/30 min-h-[60px] flex flex-col justify-center">
-            {scanError ? (
-              <p className="text-xs sm:text-sm text-yellow-500">⚠️ {scanError}</p>
-            ) : status ? (
-              <p className={`text-xs sm:text-sm ${txHash ? 'mb-2' : ''}`}>{status}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground/50">Ready to revoke approvals</p>
-            )}
-            {txHash && (
-              <a
-                href={`${chainConfig.explorer}/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline font-mono text-xs break-all flex items-center gap-1"
-              >
-                <span>{txHash}</span>
-                <ExternalLink className="w-3 h-3 shrink-0" />
-              </a>
-            )}
+          <Card className="mb-4 p-3 bg-muted/30 min-h-[60px] flex items-center justify-between gap-3">
+            <div className="flex-1">
+              {scanError ? (
+                <p className="text-xs sm:text-sm text-yellow-500">⚠️ {scanError}</p>
+              ) : status ? (
+                <p className={`text-xs sm:text-sm ${txHash ? 'mb-2' : ''}`}>{status}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground/50">Ready to revoke approvals</p>
+              )}
+              {txHash && (
+                <a
+                  href={`${chainConfig.explorer}/tx/${txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline font-mono text-xs break-all flex items-center gap-1"
+                >
+                  <span>{txHash}</span>
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                </a>
+              )}
+            </div>
+            <Button
+              onClick={() => address && scanApprovals(address, selectedChain)}
+              disabled={scanning}
+              variant="ghost"
+              size="icon"
+              className="shrink-0 h-8 w-8"
+              title="Rescan approvals"
+            >
+              <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
+            </Button>
           </Card>
         )}
 
@@ -288,11 +406,11 @@ function App() {
                   <Button
                     onClick={revokeApprovals}
                     disabled={loading}
-                    variant="destructive"
+                    variant="default"
                     size="lg"
-                    className="w-full h-12 text-base font-semibold border-2 border-destructive/20 shadow-lg"
+                    className="w-full h-12 text-base font-semibold bg-gradient-to-br from-cyan-400/30 to-emerald-400/30 backdrop-blur-xl border-2 border-cyan-300/80 shadow-[0_0_40px_rgba(34,211,238,0.5)] hover:shadow-[0_0_60px_rgba(34,211,238,0.7)] hover:border-cyan-200 transition-all text-white font-bold"
                   >
-                    <ShieldX className="w-5 h-5" />
+                    <Sparkles className="w-5 h-5" />
                     Revoke {approvals.length} Approval{approvals.length !== 1 ? 's' : ''}
                   </Button>
 

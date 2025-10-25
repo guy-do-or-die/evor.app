@@ -18,7 +18,7 @@ export const ApprovalsList = forwardRef<HTMLDivElement, ApprovalsListProps>(
         <Card className="p-6 sm:p-8 glass-glow-cyan">
           <div className="text-center space-y-3">
             <Loader2 className="w-8 h-8 mx-auto animate-spin text-cyan-400" />
-            <p className="text-sm text-muted-foreground">Scanning for active approvals...</p>
+            <p className="text-sm text-muted-foreground">Scanning approvals...</p>
           </div>
         </Card>
       )

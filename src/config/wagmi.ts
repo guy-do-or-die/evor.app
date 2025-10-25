@@ -7,7 +7,14 @@ import {
   polygon, polygonAmoy,
   bsc, bscTestnet
 } from 'wagmi/chains'
-import { injected, metaMask, coinbaseWallet } from 'wagmi/connectors'
+import { walletConnect, injected, coinbaseWallet } from 'wagmi/connectors'
+
+// Get WalletConnect project ID from https://cloud.reown.com
+const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || ''
+
+if (!projectId) {
+  console.warn('⚠️ VITE_WALLETCONNECT_PROJECT_ID is not set. Get one at https://cloud.reown.com')
+}
 
 export const config = createConfig({
   chains: [
@@ -19,9 +26,24 @@ export const config = createConfig({
     bsc, bscTestnet
   ],
   connectors: [
-    metaMask(),
-    coinbaseWallet({ appName: 'evor.app' }),
-    injected(),
+    walletConnect({
+      projectId,
+      metadata: {
+        name: 'Evorapp',
+        description: 'Evaporate all approvals in one click',
+        url: 'https://evor.app',
+        icons: ['https://avatars.githubusercontent.com/u/37784886']
+      },
+      showQrModal: true,
+      qrModalOptions: {
+        themeMode: 'dark',
+      }
+    }),
+    injected({ shimDisconnect: true }),
+    coinbaseWallet({
+      appName: 'Evorapp',
+      appLogoUrl: 'https://avatars.githubusercontent.com/u/37784886'
+    }),
   ],
   transports: {
     [mainnet.id]: http(import.meta.env.VITE_ETH_RPC_URL),

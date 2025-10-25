@@ -13,6 +13,12 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
+    base: {
+      type: "http",
+      url: process.env.BASE_RPC || "https://mainnet.base.org",
+      accounts: process.env.DEMO_EOA_PK ? [process.env.DEMO_EOA_PK] : [],
+      chainId: 8453,
+    },
     baseSepolia: {
       type: "http",
       url: process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org",

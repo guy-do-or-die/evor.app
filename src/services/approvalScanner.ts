@@ -5,7 +5,8 @@ import { getCachedToken, setCachedToken } from '../utils/tokenCache'
 
 // Constants
 export const PERMIT2_ADDRESS = '0x000000000022d473030f116ddee9f6b43ac78ba3' as const
-const APPROVAL_EVENT_TOPIC = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
+const APPROVAL_EVENT_TOPIC = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925' // ERC20 Approval
+const APPROVAL_FOR_ALL_TOPIC = '0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31' // ERC721/ERC1155 ApprovalForAll
 const MIN_ALLOWANCE = 100n
 
 const ERC20_ABI = parseAbi([
@@ -14,6 +15,14 @@ const ERC20_ABI = parseAbi([
   'function decimals() view returns (uint8)',
   'function allowance(address owner, address spender) view returns (uint256)',
 ])
+
+const NFT_ABI = parseAbi([
+  'function isApprovedForAll(address owner, address operator) view returns (bool)',
+  'function supportsInterface(bytes4 interfaceId) view returns (bool)',
+])
+
+// ERC1155 interface ID
+const ERC1155_INTERFACE_ID = '0xd9b67a26'
 
 // Types
 interface HyperSyncLog {
@@ -32,6 +41,7 @@ interface ParsedApproval {
   token: string
   spender: string
   allowance: bigint
+  tokenType: 'ERC20' | 'ERC721' | 'ERC1155'
 }
 
 // ============================================================================
@@ -46,12 +56,22 @@ export async function fetchApprovalEvents(
   
   const query = {
     from_block: 0,
-    logs: [{
-      topics: [
-        [APPROVAL_EVENT_TOPIC],
-        [ownerTopic],
-      ],
-    }],
+    logs: [
+      // ERC20 Approval events
+      {
+        topics: [
+          [APPROVAL_EVENT_TOPIC],
+          [ownerTopic],
+        ],
+      },
+      // ERC721/ERC1155 ApprovalForAll events
+      {
+        topics: [
+          [APPROVAL_FOR_ALL_TOPIC],
+          [ownerTopic],
+        ],
+      }
+    ],
     field_selection: {
       block: ['number'],
       log: ['address', 'topic0', 'topic1', 'topic2', 'topic3', 'data', 'log_index', 'transaction_index'],
@@ -114,27 +134,68 @@ export function parseApprovalLogs(logs: HyperSyncLog[]): ParsedApproval[] {
   
   for (const log of sorted) {
     const token = log.address
-    const spenderTopic = log.topic2
-    const allowanceHex = log.data
+    const eventTopic = log.topic0
     
-    if (!token || !spenderTopic) continue
+    if (!token || !eventTopic) continue
     
-    const spender = `0x${spenderTopic.slice(26)}`
-    const key = `${token}-${spender}`
-    
-    try {
-      const allowance = allowanceHex && allowanceHex !== '0x' 
-        ? BigInt(allowanceHex) 
-        : 0n
-      latestMap.set(key, { token, spender, allowance })
-    } catch {
-      latestMap.set(key, { token, spender, allowance: 0n })
+    // Handle ERC20 Approval events
+    if (eventTopic === APPROVAL_EVENT_TOPIC) {
+      const spenderTopic = log.topic2
+      const allowanceHex = log.data
+      
+      if (!spenderTopic) continue
+      
+      const spender = `0x${spenderTopic.slice(26)}`
+      const key = `${token}-${spender}`
+      
+      try {
+        const allowance = allowanceHex && allowanceHex !== '0x' 
+          ? BigInt(allowanceHex) 
+          : 0n
+        latestMap.set(key, { token, spender, allowance, tokenType: 'ERC20' })
+      } catch {
+        latestMap.set(key, { token, spender, allowance: 0n, tokenType: 'ERC20' })
+      }
+    }
+    // Handle ERC721/ERC1155 ApprovalForAll events
+    else if (eventTopic === APPROVAL_FOR_ALL_TOPIC) {
+      const operatorTopic = log.topic2
+      const dataHex = log.data
+      
+      if (!operatorTopic) continue
+      
+      const operator = `0x${operatorTopic.slice(26)}`
+      const key = `${token}-${operator}`
+      
+      try {
+        // Parse bool from data (last byte)
+        const approved = dataHex && dataHex !== '0x' && dataHex !== '0x0' 
+          && !dataHex.endsWith('0'.repeat(64))
+        
+        if (approved) {
+          // Use max uint256 to represent "all NFTs" approval
+          latestMap.set(key, { 
+            token, 
+            spender: operator, 
+            allowance: BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'),
+            tokenType: 'ERC721' // Default to ERC721, we'll detect ERC1155 later if needed
+          })
+        } else {
+          // Revoked - set to 0
+          const existing = latestMap.get(key)
+          if (existing) {
+            latestMap.set(key, { ...existing, allowance: 0n })
+          }
+        }
+      } catch {
+        // On error, don't add this approval
+      }
     }
   }
 
-  // Filter out zero/negligible allowances
+  // Filter out zero/negligible allowances for ERC20, but keep all NFT approvals
   return Array.from(latestMap.values())
-    .filter(a => a.allowance >= MIN_ALLOWANCE)
+    .filter(a => a.tokenType !== 'ERC20' || a.allowance >= MIN_ALLOWANCE)
 }
 
 // ============================================================================
@@ -253,12 +314,25 @@ export async function fetchCurrentAllowances(
   owner: Address,
   publicClient: PublicClient
 ): Promise<Map<string, bigint>> {
-  const contracts = approvals.map(a => ({
-    address: a.token as Address,
-    abi: ERC20_ABI,
-    functionName: 'allowance' as const,
-    args: [owner, a.spender as Address],
-  }))
+  // Split ERC20 and NFT approvals - they need different contract calls
+  const contracts = approvals.map(a => {
+    if (a.tokenType === 'ERC20') {
+      return {
+        address: a.token as Address,
+        abi: ERC20_ABI,
+        functionName: 'allowance' as const,
+        args: [owner, a.spender as Address],
+      }
+    } else {
+      // ERC721/ERC1155 use isApprovedForAll
+      return {
+        address: a.token as Address,
+        abi: NFT_ABI,
+        functionName: 'isApprovedForAll' as const,
+        args: [owner, a.spender as Address],
+      }
+    }
+  })
 
   // Split into chunks of 50 to avoid RPC limits
   const CHUNK_SIZE = 50
@@ -285,10 +359,19 @@ export async function fetchCurrentAllowances(
   const allowanceMap = new Map<string, bigint>()
   approvals.forEach((approval, i) => {
     const key = `${approval.token}-${approval.spender}`
-    const allowance = allResults[i]?.status === 'success' 
-      ? BigInt(String(allResults[i].result)) 
-      : 0n
-    allowanceMap.set(key, allowance)
+    if (approval.tokenType === 'ERC20') {
+      const allowance = allResults[i]?.status === 'success' 
+        ? BigInt(String(allResults[i].result)) 
+        : 0n
+      allowanceMap.set(key, allowance)
+    } else {
+      // NFT approval: convert bool to 0 or max uint256
+      const isApproved = allResults[i]?.status === 'success' && allResults[i].result === true
+      const allowance = isApproved 
+        ? BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+        : 0n
+      allowanceMap.set(key, allowance)
+    }
   })
 
   // Detect suspicious all-zero results (stale RPC)
@@ -306,7 +389,51 @@ export async function fetchCurrentAllowances(
 }
 
 // ============================================================================
-// 5. APPROVAL ENRICHMENT - Combine all data
+// 5. NFT TYPE DETECTION - Detect ERC1155 vs ERC721
+// ============================================================================
+
+export async function detectNFTTypes(
+  approvals: ParsedApproval[],
+  publicClient: PublicClient
+): Promise<void> {
+  // Get unique NFT tokens
+  const nftTokens = Array.from(new Set(
+    approvals.filter(a => a.tokenType !== 'ERC20').map(a => a.token)
+  ))
+  
+  if (nftTokens.length === 0) return
+  
+  // Check each NFT for ERC1155 interface support
+  const checks = nftTokens.map(token => ({
+    address: token as Address,
+    abi: NFT_ABI,
+    functionName: 'supportsInterface' as const,
+    args: [ERC1155_INTERFACE_ID as `0x${string}`],
+  }))
+  
+  try {
+    const results = await publicClient.multicall({ contracts: checks })
+    
+    // Update tokenType for ERC1155 tokens
+    results.forEach((result, i) => {
+      if (result.status === 'success' && result.result === true) {
+        const token = nftTokens[i]
+        // Update all approvals for this token
+        approvals.forEach(approval => {
+          if (approval.token === token) {
+            approval.tokenType = 'ERC1155'
+          }
+        })
+      }
+    })
+  } catch (error) {
+    console.warn('Failed to detect NFT types:', error)
+    // Continue without type detection - defaults to ERC721
+  }
+}
+
+// ============================================================================
+// 6. APPROVAL ENRICHMENT - Combine all data
 // ============================================================================
 
 export function enrichApprovals(
@@ -329,6 +456,7 @@ export function enrichApprovals(
       decimals: metadata?.decimals || 18,
       isActive: currentAllowance >= MIN_ALLOWANCE,
       isPermit2,
+      tokenType: parsed.tokenType,
     }
   })
 }
