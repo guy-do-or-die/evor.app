@@ -1,19 +1,31 @@
-/* Enhance particle visibility - optimized for performance */
+/* Enhance particle visibility */
 .snap-particles-container canvas {
-  filter: brightness(1.2) saturate(1.2);
-  mix-blend-mode: screen;
-  will-change: transform, opacity;
+  opacity: 0.95;
 }
 
 .snap-particles-container {
   position: relative;
-  contain: layout style paint;
-  /* Prevent height collapse during snap to avoid scrollbar jump */
-  min-height: var(--container-height, auto);
-  transition: min-height 0.3s ease-out;
 }
 
-/* Prevent scrollbar from causing layout shift */
-body {
-  overflow-y: scroll;
+/* Disassembly effect - elements visually disintegrate */
+.snap-particles-container.snapping > *:not(canvas) {
+  animation: disassemble 0.5s ease-out forwards;
+}
+
+@keyframes disassemble {
+  0% {
+    opacity: 1;
+    filter: blur(0px);
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    filter: blur(1px);
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 0.2;
+    filter: blur(2px);
+    transform: scale(0.95);
+  }
 }

@@ -1,299 +1,56 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAccount, useConnect, useDisconnect, useWalletClient, usePublicClient } from 'wagmi'
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi'
 import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
 import { Thanos } from 'vanish-effect'
+import { ExternalLink, ShieldX, ChevronUp, ChevronDown } from 'lucide-react'
 import EvorappLogo from './components/EvorappLogo'
+import { WalletConnection } from './components/wallet/WalletConnection'
+import { ApprovalsList } from './components/approvals/ApprovalsList'
+import { Button } from './components/ui/button'
+import { Card } from './components/ui/card'
+import { Checkbox } from './components/ui/checkbox'
+import { useNetwork, CHAIN_CONFIGS } from './hooks/useNetwork'
+import { useApprovalScanner } from './hooks/useApprovalScanner'
 import './components/SnapEnhance.css'
-
-declare global {
-  interface Window {
-    ethereum?: any
-  }
-}
 
 const EVOR_DELEGATE = '0x430cae04bdfc596be0ca98b46279c3babf080620' as const
 
 function App() {
-  const { address, isConnected, connector } = useAccount()
-  const { connect, connectors } = useConnect()
-  const { disconnect } = useDisconnect()
-  const { data: walletClient } = useWalletClient({ account: address })
+  const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
   
-  useEffect(() => {
-    console.log('Wallet state:', { isConnected, address, hasWalletClient: !!walletClient, connector: connector?.name })
-  }, [isConnected, address, walletClient, connector])
-
-  const [approvalPairs, setApprovalPairs] = useState<Array<{ token: string; spender: string; allowance?: string }>>([])
+  const { selectedChain, wrongNetwork, chainConfig, switchChain, setSelectedChain } = useNetwork()
+  const { approvals, scanning, scanApprovals, setApprovals, error: scanError } = useApprovalScanner()
+  
   const [status, setStatus] = useState('')
   const [txHash, setTxHash] = useState('')
   const [loading, setLoading] = useState(false)
-  const [wrongNetwork, setWrongNetwork] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [currentChainId, setCurrentChainId] = useState<string>('')
   const [clearDelegationAfter, setClearDelegationAfter] = useState(true)
+  const [enableSupport, setEnableSupport] = useState(true)
+  const [ethSupport, setEthSupport] = useState('0.0001')
   const [snapEffect, setSnapEffect] = useState(false)
   const approvalsRef = useRef<HTMLDivElement>(null)
-  
-  // Check network on connect
-  useEffect(() => {
-    const checkNetwork = async () => {
-      if (window.ethereum && isConnected) {
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' })
-        setCurrentChainId(chainId)
-        // Allow both Base mainnet (0x2105) and Base Sepolia (0x14a34)
-        setWrongNetwork(chainId !== '0x14a34' && chainId !== '0x2105')
-      }
-    }
-    checkNetwork()
-    
-    // Listen for network changes
-    if (window.ethereum) {
-      window.ethereum.on('chainChanged', (chainId: string) => {
-        setCurrentChainId(chainId)
-        setWrongNetwork(chainId !== '0x14a34' && chainId !== '0x2105')
-      })
-    }
-  }, [isConnected])
 
-  const scanApprovals = async () => {
-    if (!address || !publicClient) return
-    
-    setScanning(true)
-    setStatus('Scanning for approvals with HyperSync...')
-    
-    try {
-      // Get current chain ID directly from wallet to ensure it's up to date
-      const chainId = window.ethereum ? await window.ethereum.request({ method: 'eth_chainId' }) : currentChainId
-      
-      console.log('Current chain ID:', chainId, 'State chain ID:', currentChainId)
-      
-      // Determine network and HyperSync endpoint
-      const isMainnet = chainId === '0x2105'
-      const networkName = isMainnet ? 'Base Mainnet' : 'Base Sepolia'
-      const hypersyncPath = isMainnet ? '/hypersync/base/query' : '/hypersync/base-sepolia/query'
-      
-      console.log(`Querying HyperSync REST API for ${networkName}...`)
-      console.log(`Using endpoint: ${hypersyncPath}`)
-      
-      // ERC20 Approval event signature
-      const approvalTopic = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
-      // Owner address as topic (32 bytes with padding)
-      const ownerTopic = `0x000000000000000000000000${address.slice(2).toLowerCase()}`
-      
-      // Query HyperSync REST API
-      const query = {
-        from_block: 0,
-        logs: [{
-          topics: [
-            [approvalTopic], // topic0: Approval event signature
-            [ownerTopic],    // topic1: owner address (indexed)
-          ],
-        }],
-        field_selection: {
-          block: ['number'],
-          log: ['address', 'topic0', 'topic1', 'topic2', 'topic3', 'data', 'log_index', 'transaction_index'],
-          transaction: ['transaction_index', 'block_number'],
-        },
-      }
-      
-      console.log(`🔍 Scanning ${networkName} for approvals...`)
-      setStatus(`Querying HyperSync on ${networkName}...`)
-      
-      const url = hypersyncPath
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_HYPERSYNC_TOKEN}`,
-      }
-      const body = JSON.stringify(query)
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body,
-      })
-      
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error('❌ HyperSync API error:', response.status, errorText)
-        throw new Error(`HyperSync API error: ${response.status} - ${errorText}`)
-      }
-      
-      const data = await response.json()
-      
-      // Flatten logs from all blocks and track block number for sorting
-      const allLogs: any[] = []
-      if (data.data && Array.isArray(data.data)) {
-        for (const item of data.data) {
-          // HyperSync returns { logs: [...], blocks: [{number: ...}] }
-          const blockNumber = item.blocks && item.blocks[0] ? item.blocks[0].number : 0
-          
-          if (item.logs && Array.isArray(item.logs)) {
-            // Add block info to each log
-            for (const log of item.logs) {
-              allLogs.push({
-                ...log,
-                blockNumber,
-              })
-            }
-          }
-        }
-      }
-      
-      // Sort logs chronologically to get the most recent approval for each pair
-      allLogs.sort((a, b) => {
-        const blockDiff = (a.blockNumber || 0) - (b.blockNumber || 0)
-        if (blockDiff !== 0) return blockDiff
-        
-        const txDiff = (a.transaction_index || 0) - (b.transaction_index || 0)
-        if (txDiff !== 0) return txDiff
-        
-        return (a.log_index || 0) - (b.log_index || 0)
-      })
-      
-      console.log(`📝 Processing ${allLogs.length} approval events...`)
-      
-      // Parse token/spender pairs and get the MOST RECENT allowance from event data
-      const latestApprovals = new Map<string, { token: string; spender: string; allowance: bigint }>()
-      
-      for (const log of allLogs) {
-        const tokenAddress = log.address
-        const spenderTopic = log.topic2
-        const allowanceHex = log.data
-        
-        if (tokenAddress && spenderTopic) {
-          const spender = `0x${spenderTopic.slice(26)}` // Remove padding
-          const key = `${tokenAddress}-${spender}`
-          
-          try {
-            // Decode the allowance from hex (empty = 0 = revoked)
-            const allowance = allowanceHex && allowanceHex !== '0x' ? BigInt(allowanceHex) : 0n
-            // Store the latest approval (we're iterating chronologically)
-            latestApprovals.set(key, { token: tokenAddress, spender, allowance })
-          } catch (error) {
-            // If parsing fails, treat as 0 allowance (revoked)
-            latestApprovals.set(key, { token: tokenAddress, spender, allowance: 0n })
-          }
-        }
-      }
-      setStatus(`Processing ${latestApprovals.size} approvals...`)
-      
-      // Filter to only active approvals (allowance > 0)
-      // Note: We explicitly exclude 0 allowances (revoked approvals)
-      // Also filter out dust approvals (< 100 wei which are likely errors/spam)
-      const activeApprovals: Array<{ token: string; spender: string; allowance: string }> = []
-      let skippedCount = 0
-      const MIN_ALLOWANCE = 100n // Minimum 100 wei to be considered active
-      
-      for (const [, approval] of latestApprovals) {
-        // Only include if allowance is explicitly greater than dust threshold
-        if (approval.allowance >= MIN_ALLOWANCE) {
-          activeApprovals.push({
-            token: approval.token,
-            spender: approval.spender,
-            allowance: approval.allowance.toString(),
-          })
-        } else {
-          skippedCount++
-        }
-      }
-      
-      console.log(`📊 Found ${activeApprovals.length} active approvals, skipped ${skippedCount} (revoked/dust)`)
-      
-      // Fetch token symbols, decimals, and VERIFY current allowances
-      setStatus(`Verifying ${activeApprovals.length} approvals on-chain...`)
-      const erc20Abi = parseAbi([
-        'function symbol() view returns (string)',
-        'function name() view returns (string)',
-        'function decimals() view returns (uint8)',
-        'function allowance(address owner, address spender) view returns (uint256)',
-      ])
-      
-      const approvalsWithMetadata = await Promise.all(
-        activeApprovals.map(async (approval) => {
-          try {
-            const [symbol, name, decimals, currentAllowance] = await Promise.all([
-              publicClient.readContract({
-                address: approval.token as Address,
-                abi: erc20Abi,
-                functionName: 'symbol',
-              }).catch(() => '???'),
-              publicClient.readContract({
-                address: approval.token as Address,
-                abi: erc20Abi,
-                functionName: 'name',
-              }).catch(() => 'Unknown Token'),
-              publicClient.readContract({
-                address: approval.token as Address,
-                abi: erc20Abi,
-                functionName: 'decimals',
-              }).catch(() => 18),
-              publicClient.readContract({
-                address: approval.token as Address,
-                abi: erc20Abi,
-                functionName: 'allowance',
-                args: [address, approval.spender as Address],
-              }).catch(() => 0n), // VERIFY current on-chain allowance
-            ])
-            
-            return {
-              ...approval,
-              tokenSymbol: symbol,
-              tokenName: name,
-              decimals: Number(decimals),
-              currentAllowance: currentAllowance.toString(), // Verified on-chain value
-            }
-          } catch (error) {
-            return {
-              ...approval,
-              tokenSymbol: '???',
-              tokenName: 'Unknown Token',
-              decimals: 18,
-              currentAllowance: '0',
-            }
-          }
-        })
-      )
-      
-      // Filter out approvals that have been revoked since the events  
-      const verifiedApprovals = approvalsWithMetadata.filter(approval => {
-        const currentAllowance = BigInt(approval.currentAllowance || '0')
-        return currentAllowance >= 100n // Use same threshold as initial filter
-      })
-      
-      console.log(`✅ Verified: ${verifiedApprovals.length} still active, ${approvalsWithMetadata.length - verifiedApprovals.length} already revoked`)
-      
-      setApprovalPairs(verifiedApprovals)
-      
-      if (verifiedApprovals.length > 0) {
-        const unlimitedCount = verifiedApprovals.filter(a => 
-          BigInt(a.currentAllowance || '0') > BigInt('1000000000000000000000000000')
-        ).length
-        
-        console.log(`Found ${verifiedApprovals.length} verified active approvals (${unlimitedCount} unlimited)`)
-        setStatus(`✅ Found ${verifiedApprovals.length} active approvals (${unlimitedCount} unlimited)`)
-      } else {
-        setStatus('✅ No active approvals found! Your wallet is clean.')
-      }
-      
-    } catch (error: any) {
-      console.error('❌ Error scanning approvals:', error.message)
-      setStatus(`❌ Error: ${error.message || 'Unknown error'}`)
-    } finally {
-      setScanning(false)
+  // Auto-scan on wallet connection, network change, or manual chain selection
+  useEffect(() => {
+    if (isConnected && address && !wrongNetwork) {
+      scanApprovals(address, selectedChain)
     }
+  }, [isConnected, address, selectedChain, wrongNetwork, scanApprovals])
+
+  const handleChainChange = async (chain: typeof selectedChain) => {
+    setSelectedChain(chain)
+    await switchChain(chain)
   }
 
-  const revokeApproval = async () => {
-    console.log('Batch revoke clicked', { connector: !!connector, address, pairs: approvalPairs.length, isConnected })
-    
-    if (!isConnected || !address || !connector) {
+  const revokeApprovals = async () => {
+    if (!isConnected || !address || !window.ethereum) {
       setStatus('❌ Please connect your wallet first')
       return
     }
     
-    if (approvalPairs.length === 0) {
-      setStatus('❌ No approvals to revoke. Add at least one token/spender pair.')
+    if (approvals.length === 0) {
+      setStatus('❌ No approvals to revoke')
       return
     }
     
@@ -302,30 +59,9 @@ function App() {
     setTxHash('')
     
     try {
-      console.log('Creating wallet client from provider...')
-      if (!window.ethereum || !address) {
-        throw new Error('No ethereum provider found')
-      }
-      
-      // Check network - must be Base Mainnet or Sepolia
-      setStatus('Checking network...')
-      const chainId = await window.ethereum.request({ method: 'eth_chainId' })
-      console.log('Current chain ID:', chainId)
-      
-      const validChains = ['0x2105', '0x14a34'] // Base Mainnet, Base Sepolia
-      if (!validChains.includes(chainId)) {
-        throw new Error('Please switch to Base Mainnet or Base Sepolia in your wallet')
-      }
-      
-      // Get current nonce
-      setStatus('Getting account nonce...')
       const nonce = await publicClient!.getTransactionCount({ address })
-      console.log('Current nonce:', nonce)
       
-      // Get current chain ID
-      const currentChainId = chainId === '0x2105' ? 8453 : 84532 // Base Mainnet or Sepolia
-      
-      // Create EIP-712 typed data for EIP-7702 authorization
+      // Create EIP-7702 authorization
       const typedData = {
         types: {
           EIP712Domain: [
@@ -343,59 +79,43 @@ function App() {
         domain: {
           name: 'EIP-7702',
           version: '1',
-          chainId: currentChainId,
+          chainId: chainConfig.chainId,
         },
         message: {
-          chainId: currentChainId,
+          chainId: chainConfig.chainId,
           address: EVOR_DELEGATE,
           nonce: Number(nonce),
         },
       }
       
-      console.log('Requesting signature from wallet...')
-      setStatus('Please sign the authorization in your wallet...')
-      
-      // Request signature from MetaMask using EIP-712
+      setStatus('Please sign the authorization...')
       const signature = await window.ethereum.request({
         method: 'eth_signTypedData_v4',
         params: [address, JSON.stringify(typedData)],
       })
       
-      console.log('Signature received:', signature)
-      
-      // Parse signature
       const sig = hexToSignature(signature)
-      
-      // Create authorization object
       const authorization = {
-        chainId: currentChainId,
+        chainId: chainConfig.chainId,
         address: EVOR_DELEGATE,
         nonce,
         ...sig,
       }
       
-      console.log('Authorization created:', authorization)
       setStatus('Sending revoke transaction...')
       
-      // Create wallet client with correct chain
-      const { base, baseSepolia: baseSepoliaChain } = await import('viem/chains')
-      const currentChain = chainId === '0x2105' ? base : baseSepoliaChain
-      
       const client = createWalletClient({
-        chain: currentChain,
+        chain: CHAIN_CONFIGS[selectedChain].chain,
         transport: custom(window.ethereum),
       })
       
-      // Execute revoke
       const evorAbi = parseAbi([
         'function revokeERC20(address[] tokens, address[] spenders) external',
       ])
       
-      // Extract tokens and spenders arrays
-      const tokens = approvalPairs.map(p => p.token as Address)
-      const spenders = approvalPairs.map(p => p.spender as Address)
+      const tokens = approvals.map(p => p.token as Address)
+      const spenders = approvals.map(p => p.spender as Address)
       
-      console.log(`Batch revoking ${approvalPairs.length} approvals...`, { tokens, spenders })
       const hash = await client.writeContract({
         account: address,
         abi: evorAbi,
@@ -405,141 +125,64 @@ function App() {
         args: [tokens, spenders],
       })
       
-      console.log('Transaction sent:', hash)
       setTxHash(hash)
-      setStatus('Transaction sent! Waiting for confirmation...')
+      setStatus('Waiting for confirmation...')
       
       if (publicClient) {
         const receipt = await publicClient.waitForTransactionReceipt({ hash })
         
-        // Check if transaction was successful
         if (receipt.status === 'reverted') {
-          throw new Error('Transaction reverted - check approvals are still valid')
+          throw new Error('Transaction reverted')
         }
         
-        const revokedCount = approvalPairs.length
+        const revokedCount = approvals.length
         
-        // Trigger Thanos snap effect before clearing
+        // Trigger snap effect
         if (approvalsRef.current) {
-          // Lock container height to prevent scrollbar jump
-          const containerHeight = approvalsRef.current.offsetHeight
-          approvalsRef.current.style.setProperty('--container-height', `${containerHeight}px`)
+          setSnapEffect(true)
           
           Thanos.snap(approvalsRef.current, {
             duration: 2,
-            randomness: 0.7,
+            randomness: 0.9,
+            particleDensity: 5,
             onComplete: () => {
-              // Single RAF for faster removal while still avoiding frame drop
-              requestAnimationFrame(() => {
-                setApprovalPairs([])
-                setSnapEffect(false)
-                // Reset height after clearing
-                if (approvalsRef.current) {
-                  approvalsRef.current.style.removeProperty('--container-height')
-                }
-              })
+              setSnapEffect(false)
+              setApprovals([])
             }
           })
-          setSnapEffect(true)
-        } else {
-          setTimeout(() => {
-            setApprovalPairs([])
-            setSnapEffect(false)
-          }, 100)
         }
         
-        setStatus(`✅ Successfully revoked ${revokedCount} approvals! Cleaning up delegation...`)
+        setStatus(`✅ Revoked ${revokedCount} approvals! Cleaning up...`)
         
-        // Clear the EIP-7702 delegation for security (if enabled)
+        // Clear delegation
         if (clearDelegationAfter) {
           try {
-            await clearDelegation(client, address, currentChainId)
-            setStatus(`✅ Successfully revoked ${revokedCount} approvals and cleared delegation! Scan again to verify.`)
+            await clearDelegation(client, address, chainConfig.chainId)
+            setStatus(`✅ Revoked ${revokedCount} approvals and cleared delegation!`)
           } catch (clearError: any) {
             console.warn('Failed to clear delegation:', clearError)
-            setStatus(`✅ Revoked ${revokedCount} approvals! (Note: Failed to clear delegation - ${clearError.message || 'unknown error'})`)
+            setStatus(`✅ Revoked ${revokedCount} approvals!`)
           }
         } else {
-          setStatus(`✅ Successfully revoked ${revokedCount} approvals! (Delegation still active) Scan again to verify.`)
+          setStatus(`✅ Revoked ${revokedCount} approvals!`)
         }
+        
+        // Re-scan after a delay
+        setTimeout(() => {
+          if (address) scanApprovals(address, selectedChain)
+        }, 2000)
       }
     } catch (error: any) {
       console.error('Error revoking:', error)
-      setStatus(`❌ Error: ${error.shortMessage || error.message || 'Unknown error'}`)
+      setStatus(`❌ ${error.shortMessage || error.message || 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
   }
 
-  const demoSnap = () => {
-    // Add mock approvals if list is empty
-    if (approvalPairs.length === 0) {
-      const mockApprovals = [
-        {
-          token: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-          spender: '0x1234567890123456789012345678901234567890',
-          allowance: '115792089237316195423570985008687907853269984665640564039457584007913129639935',
-          tokenSymbol: 'USDC',
-          tokenName: 'USD Coin',
-          decimals: 6,
-          currentAllowance: '115792089237316195423570985008687907853269984665640564039457584007913129639935',
-        },
-        {
-          token: '0x4200000000000000000000000000000000000006',
-          spender: '0x0987654321098765432109876543210987654321',
-          allowance: '1000000000000000000',
-          tokenSymbol: 'WETH',
-          tokenName: 'Wrapped Ether',
-          decimals: 18,
-          currentAllowance: '1000000000000000000',
-        },
-        {
-          token: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',
-          spender: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
-          allowance: '500000000000000000000',
-          tokenSymbol: 'DAI',
-          tokenName: 'Dai Stablecoin',
-          decimals: 18,
-          currentAllowance: '500000000000000000000',
-        },
-      ]
-      setApprovalPairs(mockApprovals as any)
-      setStatus('✅ Demo data loaded - Click again to see the snap effect!')
-    } else {
-      // Trigger snap effect
-      if (approvalsRef.current) {
-        setStatus('💥 Thanos snap activated!')
-        
-        // Lock container height to prevent scrollbar jump
-        const containerHeight = approvalsRef.current.offsetHeight
-        approvalsRef.current.style.setProperty('--container-height', `${containerHeight}px`)
-        
-        Thanos.snap(approvalsRef.current, {
-          duration: 3,
-          randomness: .9,
-          onComplete: () => {
-            // Immediate removal with single RAF
-            requestAnimationFrame(() => {
-              setApprovalPairs([])
-              setSnapEffect(false)
-              setStatus('✨ Approvals evaporated!')
-              // Reset height after clearing
-              if (approvalsRef.current) {
-                approvalsRef.current.style.removeProperty('--container-height')
-              }
-            })
-          }
-        })
-        setSnapEffect(true)
-      }
-    }
-  }
-
-  const clearDelegation = async (client: any, address: Address, currentChainId: number) => {
-    // Get current nonce for clearing
+  const clearDelegation = async (client: any, address: Address, chainId: number) => {
     const nonce = await publicClient!.getTransactionCount({ address })
     
-    // Create authorization to clear delegation (set to address(0))
     const clearTypedData = {
       types: {
         EIP712Domain: [
@@ -557,34 +200,31 @@ function App() {
       domain: {
         name: 'EIP-7702',
         version: '1',
-        chainId: currentChainId,
+        chainId,
       },
       message: {
-        chainId: currentChainId,
-        address: '0x0000000000000000000000000000000000000000', // Clear delegation
+        chainId,
+        address: '0x0000000000000000000000000000000000000000',
         nonce: Number(nonce),
       },
     }
     
-    // Sign the clear authorization
     const signature = await window.ethereum.request({
       method: 'eth_signTypedData_v4',
       params: [address, JSON.stringify(clearTypedData)],
     })
     
     const sig = hexToSignature(signature)
-    
     const clearAuthorization = {
-      chainId: currentChainId,
+      chainId,
       address: '0x0000000000000000000000000000000000000000' as Address,
       nonce,
       ...sig,
     }
     
-    // Send empty transaction with clear authorization
     const clearHash = await client.sendTransaction({
       account: address,
-      to: address, // Send to self
+      to: address,
       value: 0n,
       authorizationList: [clearAuthorization],
     })
@@ -593,269 +233,166 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white">
-      <div className="container mx-auto px-4 py-12 max-w-2xl">
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 md:py-12 max-w-2xl">
         {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex justify-center mb-4">
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="flex justify-center mb-3 sm:mb-4">
             <EvorappLogo size="lg" />
           </div>
-          <p className="text-gray-400 text-lg">
-            Evor-porate all approvals in a click
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            Evor-porate all approvals in one click 
           </p>
         </div>
 
-        {/* Wrong Network Warning */}
-        {isConnected && wrongNetwork && (
-          <div className="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6">
-            <p className="text-red-300 font-semibold mb-2">⚠️ Wrong Network</p>
-            <p className="text-gray-300 text-sm mb-3">Please switch to Base Mainnet or Base Sepolia</p>
-            <div className="flex gap-2">
-              <button
-                onClick={async () => {
-                  try {
-                    await window.ethereum.request({
-                      method: 'wallet_switchEthereumChain',
-                      params: [{ chainId: '0x2105' }],
-                    })
-                  } catch (error: any) {
-                    if (error.code === 4902) {
-                      await window.ethereum.request({
-                        method: 'wallet_addEthereumChain',
-                        params: [{
-                          chainId: '0x2105',
-                          chainName: 'Base',
-                          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-                          rpcUrls: ['https://mainnet.base.org'],
-                          blockExplorerUrls: ['https://basescan.org'],
-                        }],
-                      })
-                    }
-                  }
-                }}
-                className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition"
-              >
-                Switch to Base Mainnet
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    await window.ethereum.request({
-                      method: 'wallet_switchEthereumChain',
-                      params: [{ chainId: '0x14a34' }],
-                    })
-                  } catch (error: any) {
-                    if (error.code === 4902) {
-                      await window.ethereum.request({
-                        method: 'wallet_addEthereumChain',
-                        params: [{
-                          chainId: '0x14a34',
-                          chainName: 'Base Sepolia',
-                          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-                          rpcUrls: ['https://sepolia.base.org'],
-                          blockExplorerUrls: ['https://sepolia.basescan.org'],
-                        }],
-                      })
-                    }
-                  }
-                }}
-                className="bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition"
-              >
-                Switch to Base Sepolia
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Wallet Connection */}
-        <div className="bg-slate-800 rounded-xl p-6 mb-6 border border-slate-700">
-          {!isConnected ? (
-            <div className="text-center">
-              <p className="text-gray-400 mb-4">Connect your wallet to get started</p>
-              {connectors.map((connector) => (
-                <button
-                  key={connector.id}
-                  onClick={() => connect({ connector })}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition mr-2"
-                >
-                  Connect {connector.name}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400">Connected</p>
-                <p className="font-mono text-sm">{address?.slice(0, 6)}...{address?.slice(-4)}</p>
-                <p className="text-xs text-blue-400 mt-1">
-                  {currentChainId === '0x2105' ? 'Base Mainnet' : currentChainId === '0x14a34' ? 'Base Sepolia' : `Chain ${currentChainId}`}
-                </p>
-              </div>
-              <button
-                onClick={() => disconnect()}
-                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-4 rounded-lg text-sm transition"
-              >
-                Disconnect
-              </button>
-            </div>
-          )}
+        {/* Wallet & Network */}
+        <div className="mb-4 sm:mb-6">
+          <WalletConnection
+            selectedChain={isConnected ? selectedChain : undefined}
+            onChainChange={isConnected ? handleChainChange : undefined}
+            wrongNetwork={isConnected ? wrongNetwork : undefined}
+          />
         </div>
 
-        {isConnected && (
+        {/* Notification Area - Always visible to prevent layout shifts */}
+        {isConnected && !wrongNetwork && (
+          <Card className="mb-4 p-3 bg-muted/30 min-h-[60px] flex flex-col justify-center">
+            {scanError ? (
+              <p className="text-xs sm:text-sm text-yellow-500">⚠️ {scanError}</p>
+            ) : status ? (
+              <p className={`text-xs sm:text-sm ${txHash ? 'mb-2' : ''}`}>{status}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground/50">Ready to revoke approvals</p>
+            )}
+            {txHash && (
+              <a
+                href={`${chainConfig.explorer}/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline font-mono text-xs break-all flex items-center gap-1"
+              >
+                <span>{txHash}</span>
+                <ExternalLink className="w-3 h-3 shrink-0" />
+              </a>
+            )}
+          </Card>
+        )}
+
+        {isConnected && !wrongNetwork && (
           <>
-            {/* Batch Revoke Form */}
-            <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h2 className="text-2xl font-bold">Batch Revoke Approvals</h2>
-                  <p className="text-gray-400 text-sm mt-2">Revoke multiple approvals in ONE transaction using EIP-7702</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={demoSnap}
+            {/* Approvals Section */}
+            <Card className="p-4 sm:p-6 glass-glow-purple">
+              {approvals.length > 0 && (
+                <div className="space-y-3 mb-4">
+                  {/* Revoke Button - Prominent at Top */}
+                  <Button
+                    onClick={revokeApprovals}
                     disabled={loading}
-                    className="bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition disabled:opacity-50 flex items-center gap-2"
+                    variant="destructive"
+                    size="lg"
+                    className="w-full h-12 text-base font-semibold border-2 border-destructive/20 shadow-lg"
                   >
-                    💥 Demo Snap
-                  </button>
-                  <button
-                    onClick={scanApprovals}
-                    disabled={scanning || loading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-semibold transition disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {scanning ? '🔍 Scanning...' : '🔍 Scan Approvals'}
-                  </button>
-                </div>
-              </div>
-              
-              <div className="space-y-4">
-                {/* Approval Pairs */}
-                <div ref={approvalsRef} className="snap-particles-container space-y-3">
-                {approvalPairs.map((pair, index) => (
-                  <div key={index} className="bg-purple-500 rounded-lg p-4 space-y-3">
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-white">
-                          {(pair as any).tokenSymbol || '???'}
-                        </span>
-                        {(pair as any).tokenName && (
-                          <span className="text-xs text-white/90">
-                            {(pair as any).tokenName}
-                          </span>
-                        )}
-                      </div>
+                    <ShieldX className="w-5 h-5" />
+                    Revoke {approvals.length} Approval{approvals.length !== 1 ? 's' : ''}
+                  </Button>
+
+                  {/* Settings */}
+                  <Card className="p-3 bg-muted/50">
+                    <div className="space-y-2.5">
                       <div className="flex items-center gap-3">
-                        {pair.allowance && (
-                          <span className="text-xs text-white font-semibold bg-black/20 px-2 py-1 rounded">
-                            {BigInt(pair.allowance) > BigInt('1000000000000000000000000000') 
-                              ? '♾️ Unlimited' 
-                              : (() => {
-                                  const decimals = (pair as any).decimals || 18
-                                  const amount = Number(pair.allowance) / Math.pow(10, decimals)
-                                  return `${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}`
-                                })()}
-                          </span>
-                        )}
-                        {approvalPairs.length > 1 && (
-                          <button
-                            onClick={() => setApprovalPairs(approvalPairs.filter((_, i) => i !== index))}
-                            className="text-white hover:text-white/80 text-xs bg-black/20 px-2 py-1 rounded"
-                          >
-                            Remove
-                          </button>
+                        <Checkbox
+                          id="clearDelegation"
+                          checked={clearDelegationAfter}
+                          onChange={(e) => setClearDelegationAfter(e.target.checked)}
+                        />
+                        <label htmlFor="clearDelegation" className="text-xs sm:text-sm cursor-pointer">
+                          Clear delegation after revocation
+                        </label>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          id="enableSupport"
+                          checked={enableSupport}
+                          onChange={(e) => setEnableSupport(e.target.checked)}
+                        />
+                        <label htmlFor="enableSupport" className="text-xs sm:text-sm cursor-pointer">
+                          Support the project:
+                        </label>
+                        
+                        {enableSupport && (
+                          <div className="relative inline-flex items-center h-7">
+                            <input
+                              type="text"
+                              value={ethSupport}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                  setEthSupport(val)
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'ArrowUp') {
+                                  e.preventDefault()
+                                  const current = parseFloat(ethSupport) || 0
+                                  setEthSupport((current + 0.0001).toFixed(4))
+                                } else if (e.key === 'ArrowDown') {
+                                  e.preventDefault()
+                                  const current = parseFloat(ethSupport) || 0
+                                  setEthSupport(Math.max(0, current - 0.0001).toFixed(4))
+                                }
+                              }}
+                              onBlur={() => {
+                                const num = parseFloat(ethSupport)
+                                if (isNaN(num) || num < 0) {
+                                  setEthSupport('0.0001')
+                                } else {
+                                  setEthSupport(num.toFixed(4))
+                                }
+                              }}
+                              className="h-7 w-[90px] rounded-md border border-input bg-background pl-2 pr-[38px] text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            />
+                            <div className="absolute right-[17px] flex items-center gap-1 pointer-events-none">
+                              <span className="text-[11px] text-muted-foreground font-medium">ETH</span>
+                            </div>
+                            <div className="absolute right-0 top-0 flex flex-col h-7 pointer-events-auto">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const current = parseFloat(ethSupport) || 0
+                                  setEthSupport((current + 0.0001).toFixed(4))
+                                }}
+                                className="h-[14px] w-[14px] flex items-center justify-center border border-input border-b-0 rounded-tr-md bg-background hover:bg-accent/50 transition-colors"
+                              >
+                                <ChevronUp className="h-2.5 w-2.5 text-muted-foreground" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const current = parseFloat(ethSupport) || 0
+                                  setEthSupport(Math.max(0, current - 0.0001).toFixed(4))
+                                }}
+                                className="h-[14px] w-[14px] flex items-center justify-center border border-input rounded-br-md bg-background hover:bg-accent/50 transition-colors"
+                              >
+                                <ChevronDown className="h-2.5 w-2.5 text-muted-foreground" />
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-xs text-white/90 font-semibold mb-1">Token Address</label>
-                      <input
-                        type="text"
-                        value={pair.token}
-                        onChange={(e) => {
-                          const newPairs = [...approvalPairs]
-                          newPairs[index].token = e.target.value
-                          setApprovalPairs(newPairs)
-                        }}
-                        className="w-full bg-white/15 border border-white/20 rounded px-3 py-2 font-mono text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/40"
-                        placeholder="0x..."
-                        readOnly
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-white/90 font-semibold mb-1">Spender Address</label>
-                      <input
-                        type="text"
-                        value={pair.spender}
-                        className="w-full bg-white/15 border border-white/20 rounded px-3 py-2 font-mono text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/40"
-                        placeholder="0x..."
-                        readOnly
-                      />
-                    </div>
-                  </div>
-                ))}
-                </div>
-
-                {/* Security Option */}
-                <div className="flex items-center gap-3 p-4 bg-slate-900 rounded-lg">
-                  <input
-                    type="checkbox"
-                    id="clearDelegation"
-                    checked={clearDelegationAfter}
-                    onChange={(e) => setClearDelegationAfter(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-blue-500 focus:ring-2"
-                  />
-                  <label htmlFor="clearDelegation" className="text-sm text-gray-300 cursor-pointer">
-                    Clear delegation after revocation (recommended for security)
-                    <span className="block text-xs text-gray-500 mt-1">
-                      Adds 1 extra signature + ~$0.01 gas to restore account to normal state
-                    </span>
-                  </label>
-                </div>
-
-                {/* Revoke Button */}
-                <button
-                  onClick={revokeApproval}
-                  disabled={loading || approvalPairs.length === 0 || !connector}
-                  className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold py-4 px-6 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  🚀 Batch Revoke {approvalPairs.length} Approval{approvalPairs.length !== 1 ? 's' : ''} with EIP-7702
-                </button>
-              </div>
-
-              {/* Status */}
-              {status && (
-                <div className="mt-4 p-4 bg-slate-900 rounded-lg">
-                  <p className="text-sm">{status}</p>
+                  </Card>
                 </div>
               )}
 
-              {/* Transaction Hash */}
-              {txHash && (
-                <div className="mt-4 p-4 bg-slate-900 rounded-lg">
-                  <p className="text-sm text-gray-400 mb-1">Transaction:</p>
-                  <a
-                    href={`https://sepolia.basescan.org/tx/${txHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-400 hover:text-blue-300 font-mono text-sm break-all"
-                  >
-                    {txHash}
-                  </a>
-                </div>
-              )}
-            </div>
-
-            {/* Info */}
-            <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700 rounded-lg text-sm">
-              <p className="text-blue-300 font-semibold mb-2">🚀 EIP-7702 Batch Revocation</p>
-              <p className="text-gray-300 mb-2">
-                Revoke multiple token approvals in a single transaction using EIP-7702!
-              </p>
-              <p className="text-gray-400 text-xs">
-                📜 EvorDelegate: {EVOR_DELEGATE}<br/>
-                💡 Try the CLI demo: `bun run demo:batch`
-              </p>
-            </div>
+              <ApprovalsList
+                ref={approvalsRef}
+                approvals={approvals}
+                scanning={scanning}
+                snapping={snapEffect}
+                onRemove={(index) => setApprovals(approvals.filter((_, i) => i !== index))}
+              />
+            </Card>
           </>
         )}
       </div>
