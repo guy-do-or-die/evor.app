@@ -31,12 +31,14 @@ export function ApprovalCard({ approval, index = 0, onRemove, showRemove }: Appr
   
   // NFT approvals (ApprovalForAll) should always show infinity
   const isNFTApproval = approval.tokenType === 'ERC721' || approval.tokenType === 'ERC1155'
-  const isUnlimited = isNFTApproval || BigInt(approval.allowance || '0') > BigInt('1000000000000000000000000000')
+  // Use currentAllowance (actual on-chain state) not allowance (event data)
+  const isUnlimited = isNFTApproval || BigInt(approval.currentAllowance || '0') > BigInt('1000000000000000000000000000')
   
   const formatAllowance = () => {
     if (isUnlimited) return null // Will render icon instead
     const decimals = approval.decimals || 18
-    const amount = Number(approval.allowance) / Math.pow(10, decimals)
+    // Use currentAllowance for display (actual on-chain state)
+    const amount = Number(approval.currentAllowance) / Math.pow(10, decimals)
     return amount.toLocaleString(undefined, { maximumFractionDigits: 2, notation: 'compact' })
   }
 
