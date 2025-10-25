@@ -244,7 +244,16 @@ export function useApprovalScanner() {
         }))
       })
 
-      // 8. Calculate and log stats
+      // 8. Filter to only active approvals
+      const activeOnly = sorted.filter(a => a.isActive)
+      
+      scanDebugger.log('FILTER', {
+        total: sorted.length,
+        active: activeOnly.length,
+        filtered: sorted.length - activeOnly.length
+      })
+
+      // 9. Calculate and log stats
       const stats = calculateStats(sorted)
       
       scanDebugger.endScan(scanId, {
@@ -253,20 +262,25 @@ export function useApprovalScanner() {
         revoked: stats.revoked
       })
       
+      console.log(`   🟢 Active: ${stats.active} | ⚪ Revoked: ${stats.revoked}`)
       console.log(`   🟠 Permit2: ${stats.permit2Total} (${stats.permit2Active} active)`)
       
       if (stats.permit2Active > 0) {
         console.warn(`   🚨 ${stats.permit2Active} ACTIVE PERMIT2 = HIGH RISK`)
       }
 
-      // Show sample
-      console.log('\n📋 Top 5:')
-      sorted.slice(0, 5).forEach((a, i) => {
-        const badge = a.isActive ? (a.isPermit2 ? '🟠 PERMIT2' : '🔴 ACTIVE') : '⚪ REVOKED'
-        console.log(`   ${i + 1}. ${badge} ${a.tokenSymbol} → ${a.spender.slice(0, 10)}...`)
-      })
+      // Show sample of active approvals only
+      if (activeOnly.length > 0) {
+        console.log('\n📋 Active Approvals:')
+        activeOnly.slice(0, 5).forEach((a, i) => {
+          const badge = a.isPermit2 ? '🟠 PERMIT2' : '🔴 ACTIVE'
+          console.log(`   ${i + 1}. ${badge} ${a.tokenSymbol} → ${a.spender.slice(0, 10)}...`)
+        })
+      } else {
+        console.log('\n✅ No active approvals found!')
+      }
 
-      setApprovals(sorted)
+      setApprovals(activeOnly)
     } catch (err: any) {
       scanDebugger.error(scanId, err)
       setError(err.message || 'Scan failed')
