@@ -3,15 +3,18 @@ import { Copy, Check, X, Infinity } from 'lucide-react'
 import { Card } from '../ui/card'
 import { Button } from '../ui/button'
 import type { Approval } from '../../hooks/useApprovalScanner'
+import type { SupportedChain } from '../../hooks/useNetwork'
+import { formatAddress, getExplorerUrl, copyToClipboard } from '../../utils/address'
 
 interface ApprovalCardProps {
   approval: Approval
   index?: number
   onRemove?: () => void
   showRemove?: boolean
+  selectedChain?: SupportedChain
 }
 
-export function ApprovalCard({ approval, index = 0, onRemove, showRemove }: ApprovalCardProps) {
+export function ApprovalCard({ approval, index = 0, onRemove, showRemove, selectedChain }: ApprovalCardProps) {
   const [copiedToken, setCopiedToken] = useState(false)
   const [copiedSpender, setCopiedSpender] = useState(false)
   
@@ -42,18 +45,16 @@ export function ApprovalCard({ approval, index = 0, onRemove, showRemove }: Appr
     return amount.toLocaleString(undefined, { maximumFractionDigits: 2, notation: 'compact' })
   }
 
-  const ellipseAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`
-  }
-
-  const copyToClipboard = async (text: string, type: 'token' | 'spender') => {
-    await navigator.clipboard.writeText(text)
-    if (type === 'token') {
-      setCopiedToken(true)
-      setTimeout(() => setCopiedToken(false), 2000)
-    } else {
-      setCopiedSpender(true)
-      setTimeout(() => setCopiedSpender(false), 2000)
+  const handleCopy = async (text: string, type: 'token' | 'spender') => {
+    const success = await copyToClipboard(text)
+    if (success) {
+      if (type === 'token') {
+        setCopiedToken(true)
+        setTimeout(() => setCopiedToken(false), 2000)
+      } else {
+        setCopiedSpender(true)
+        setTimeout(() => setCopiedSpender(false), 2000)
+      }
     }
   }
 
@@ -99,12 +100,24 @@ export function ApprovalCard({ approval, index = 0, onRemove, showRemove }: Appr
 
         {/* Addresses and Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Token Address */}
-          <span className="font-mono text-[10px] sm:text-xs text-muted-foreground hidden sm:inline">
-            {ellipseAddress(approval.token)}
-          </span>
+          {/* Token Address - link to explorer */}
+          {selectedChain && getExplorerUrl(approval.token, selectedChain) ? (
+            <a
+              href={getExplorerUrl(approval.token, selectedChain)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-[10px] sm:text-xs text-muted-foreground hover:text-foreground transition-colors hidden sm:inline"
+              title="View token on explorer"
+            >
+              {formatAddress(approval.token)}
+            </a>
+          ) : (
+            <span className="font-mono text-[10px] sm:text-xs text-muted-foreground hidden sm:inline">
+              {formatAddress(approval.token)}
+            </span>
+          )}
           <Button
-            onClick={() => copyToClipboard(approval.token, 'token')}
+            onClick={() => handleCopy(approval.token, 'token')}
             variant="ghost"
             size="icon"
             className="h-6 w-6 shrink-0"
@@ -113,12 +126,24 @@ export function ApprovalCard({ approval, index = 0, onRemove, showRemove }: Appr
             {copiedToken ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           </Button>
 
-          {/* Spender Address */}
-          <span className="font-mono text-[10px] sm:text-xs text-muted-foreground hidden sm:inline">
-            {ellipseAddress(approval.spender)}
-          </span>
+          {/* Spender Address - link to explorer */}
+          {selectedChain && getExplorerUrl(approval.spender, selectedChain) ? (
+            <a
+              href={getExplorerUrl(approval.spender, selectedChain)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-[10px] sm:text-xs text-muted-foreground hover:text-foreground transition-colors hidden sm:inline"
+              title="View spender on explorer"
+            >
+              {formatAddress(approval.spender)}
+            </a>
+          ) : (
+            <span className="font-mono text-[10px] sm:text-xs text-muted-foreground hidden sm:inline">
+              {formatAddress(approval.spender)}
+            </span>
+          )}
           <Button
-            onClick={() => copyToClipboard(approval.spender, 'spender')}
+            onClick={() => handleCopy(approval.spender, 'spender')}
             variant="ghost"
             size="icon"
             className="h-6 w-6 shrink-0"

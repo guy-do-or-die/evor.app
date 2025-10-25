@@ -15,18 +15,31 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
   const [search, setSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 })
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
 
   const selectedConfig = getChainConfig(selectedChain)
 
-  // Calculate dropdown position
+  // Calculate dropdown position - use left on mobile, right on desktop
   useEffect(() => {
     if (isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect()
+      const isMobile = window.innerWidth < 640
+      
+      if (isMobile) {
+        // On mobile: center dropdown or align to left edge
+        const dropdownWidth = 256 // w-64 = 16rem = 256px
+        let left = Math.max(8, (window.innerWidth - dropdownWidth) / 2)
+        setDropdownPosition({
+          top: rect.bottom + 4,
+          left
+        })
+      } else {
+        // On desktop: align to button's right edge
       setDropdownPosition({
         top: rect.bottom + 4,
-        right: window.innerWidth - rect.right
+          left: rect.right - 256 // w-64 = 256px
       })
+    }
     }
   }, [isOpen])
 

@@ -60,8 +60,7 @@ function App() {
     }
     
     // Check wallet compatibility
-    const isMetaMask = window.ethereum.isMetaMask && !window.ethereum.isRabby
-    const isRabby = window.ethereum.isRabby
+    const isMetaMask = window.ethereum?.isMetaMask && !window.ethereum?.isRabby
     
     if (isMetaMask) {
       setStatus('⚠️ MetaMask has limited EIP-7702 support. For best experience, use Rabby wallet.')
@@ -147,6 +146,8 @@ function App() {
         const tokens = erc20Approvals.map(p => p.token as Address)
         const spenders = erc20Approvals.map(p => p.spender as Address)
         
+        setStatus(`⚠️ Sign to revoke ${erc20Approvals.length} token approvals (wallet may show "Cancel Pending Transaction" - this is expected for EIP-7702)`)
+        
         hash = await client.writeContract({
           account: address,
           abi: evorAbi,
@@ -160,6 +161,8 @@ function App() {
         const collections = nftApprovals.map(p => p.token as Address)
         const operators = nftApprovals.map(p => p.spender as Address)
         
+        setStatus(`⚠️ Sign to revoke ${nftApprovals.length} NFT approvals (wallet may show "Cancel Pending Transaction" - this is expected for EIP-7702)`)
+        
         hash = await client.writeContract({
           account: address,
           abi: evorAbi,
@@ -170,7 +173,7 @@ function App() {
         })
       } else {
         // Mixed - revoke ERC20 first, then NFTs with a new authorization
-        setStatus('Revoking ERC20 approvals...')
+        setStatus(`⚠️ Sign to revoke ${erc20Approvals.length} token approvals (1/2 - wallet may show "Cancel Pending Transaction" - this is expected)`)
         
         const tokens = erc20Approvals.map(p => p.token as Address)
         const spenders = erc20Approvals.map(p => p.spender as Address)
@@ -215,7 +218,7 @@ function App() {
           ...sig2,
         }
         
-        setStatus('Revoking NFT approvals...')
+        setStatus(`⚠️ Sign to revoke ${nftApprovals.length} NFT approvals (2/2 - wallet may show "Cancel Pending Transaction" - this is expected)`)
         
         const collections = nftApprovals.map(p => p.token as Address)
         const operators = nftApprovals.map(p => p.spender as Address)
@@ -315,6 +318,10 @@ function App() {
       },
     }
     
+    if (!window.ethereum) {
+      throw new Error('No wallet detected')
+    }
+    
     const signature = await window.ethereum.request({
       method: 'eth_signTypedData_v4',
       params: [address, JSON.stringify(clearTypedData)],
@@ -340,14 +347,14 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 md:py-12 max-w-2xl">
+      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 md:py-12 max-w-2xl">
         {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
-          <div className="flex justify-center mb-3 sm:mb-4">
+          <div className="flex justify-center mb-4 sm:mb-6 scale-75 sm:scale-90 md:scale-100">
             <EvorappLogo size="lg" />
           </div>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            Evor-porate all approvals in one click 
+          <p className="text-sm sm:text-base md:text-lg font-medium bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 text-transparent bg-clip-text animate-glow-subtle">
+            Evor-porate all approvals in one click
           </p>
         </div>
 
@@ -508,6 +515,7 @@ function App() {
                 approvals={approvals}
                 scanning={scanning}
                 snapping={snapEffect}
+                selectedChain={selectedChain}
                 onRemove={(index) => setApprovals(approvals.filter((_, i) => i !== index))}
               />
             </Card>

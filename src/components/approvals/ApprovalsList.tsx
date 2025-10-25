@@ -2,6 +2,7 @@ import { forwardRef } from 'react'
 import { Loader2, CheckCircle } from 'lucide-react'
 import { Card } from '../ui/card'
 import type { Approval } from '../../hooks/useApprovalScanner'
+import type { SupportedChain } from '../../hooks/useNetwork'
 import { ApprovalCard } from './ApprovalCard'
 
 interface ApprovalsListProps {
@@ -9,10 +10,11 @@ interface ApprovalsListProps {
   onRemove?: (index: number) => void
   scanning?: boolean
   snapping?: boolean
+  selectedChain?: SupportedChain
 }
 
 export const ApprovalsList = forwardRef<HTMLDivElement, ApprovalsListProps>(
-  ({ approvals, onRemove, scanning, snapping }, ref) => {
+  ({ approvals, onRemove, scanning, snapping, selectedChain }, ref) => {
     if (scanning) {
       return (
         <Card className="p-6 sm:p-8 glass-glow-cyan">
@@ -45,6 +47,7 @@ export const ApprovalsList = forwardRef<HTMLDivElement, ApprovalsListProps>(
             index={index}
             onRemove={onRemove ? () => onRemove(index) : undefined}
             showRemove={approvals.length > 1}
+            selectedChain={selectedChain}
           />
         ))}
       </div>
