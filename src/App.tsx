@@ -401,13 +401,22 @@ function App() {
                   {/* Revoke Button - Prominent at Top */}
                   <Button
                     onClick={revokeApprovals}
-                    disabled={loading}
+                    disabled={loading || scanning}
                     variant="default"
                     size="lg"
                     className="w-full h-12 text-base font-semibold bg-gradient-to-br from-cyan-400/30 to-emerald-400/30 backdrop-blur-xl border-2 border-cyan-300/80 shadow-[0_0_40px_rgba(34,211,238,0.5)] hover:shadow-[0_0_60px_rgba(34,211,238,0.7)] hover:border-cyan-200 transition-all text-white font-bold"
                   >
-                    <Sparkles className="w-5 h-5" />
-                    Revoke {approvals.length} Approval{approvals.length !== 1 ? 's' : ''}
+                    {scanning ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        Scanning approvals...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-5 h-5" />
+                        Revoke {approvals.length} Approval{approvals.length !== 1 ? 's' : ''}
+                      </>
+                    )}
                   </Button>
 
                   {/* Settings */}
