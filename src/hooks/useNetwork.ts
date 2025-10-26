@@ -14,6 +14,7 @@ interface ChainConfig {
   hypersyncPath: string
   category: 'mainnet' | 'testnet'
   scanningSupported: boolean
+  logoUrl: string
 }
 
 // Get HyperSync endpoint based on environment
@@ -23,13 +24,14 @@ export function getHypersyncEndpoint(chainKey: SupportedChain): string {
 
 // Convert centralized config to legacy format for compatibility
 export const CHAIN_CONFIGS: Record<SupportedChain, ChainConfig> = Object.fromEntries(
-  SUPPORTED_CHAINS.map(({ key, chain, category, scanningSupported }) => [
+  SUPPORTED_CHAINS.map(({ key, chain, category, scanningSupported, logoUrl }) => [
     key,
     {
       chain,
       hypersyncPath: `/hypersync/${key}/query`,
       category,
-      scanningSupported
+      scanningSupported,
+      logoUrl
     }
   ])
 ) as Record<SupportedChain, ChainConfig>

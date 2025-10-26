@@ -17,6 +17,14 @@ interface ApprovalCardProps {
 export function ApprovalCard({ approval, index = 0, onRemove, showRemove, selectedChain }: ApprovalCardProps) {
   const [copiedToken, setCopiedToken] = useState(false)
   const [copiedSpender, setCopiedSpender] = useState(false)
+  const [tokenLogoError, setTokenLogoError] = useState(false)
+  
+  // Get token logo URL from Trust Wallet assets
+  const getTokenLogoUrl = () => {
+    if (!selectedChain) return null
+    // Trust Wallet assets CDN format - using ethereum for now as it has the most coverage
+    return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${approval.token}/logo.png`
+  }
   
   // Cycle through all logo colors based on index
   const getGradientClass = (idx: number) => {
@@ -69,6 +77,16 @@ export function ApprovalCard({ approval, index = 0, onRemove, showRemove, select
       <div className="flex items-center justify-between gap-2">
         {/* Amount and Token */}
         <div className="flex items-center gap-1.5 min-w-0">
+          {/* Token Logo */}
+          {!tokenLogoError && getTokenLogoUrl() && (
+            <img 
+              src={getTokenLogoUrl()!} 
+              alt=""
+              className="w-5 h-5 sm:w-6 sm:h-6 rounded-full shrink-0"
+              onError={() => setTokenLogoError(true)}
+            />
+          )}
+          
           {isUnlimited ? (
             <div className="inline-flex items-center">
               <Infinity className={`w-5 h-5 sm:w-6 sm:h-6 ${approval.isActive ? 'text-white' : 'text-muted-foreground'}`} strokeWidth={2.5} />

@@ -17,6 +17,7 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const [showDropdown, setShowDropdown] = useState(false)
+  const [focusedIndex, setFocusedIndex] = useState(-1)
 
   const selectedConfig = getChainConfig(selectedChain)
 
@@ -68,6 +69,9 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
 
   const filteredMainnets = filterChains(mainnets)
   const filteredTestnets = filterChains(testnets)
+  
+  // Combine all filtered chains for keyboard navigation
+  const allFilteredChains = [...filteredMainnets, ...filteredTestnets]
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -85,7 +89,35 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
     onChainChange(chain)
     setIsOpen(false)
     setSearch('')
+    setFocusedIndex(-1)
   }
+  
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!allFilteredChains.length) return
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setFocusedIndex(prev => 
+        prev < allFilteredChains.length - 1 ? prev + 1 : 0
+      )
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setFocusedIndex(prev => 
+        prev > 0 ? prev - 1 : allFilteredChains.length - 1
+      )
+    } else if (e.key === 'Enter' && focusedIndex >= 0) {
+      e.preventDefault()
+      handleSelect(allFilteredChains[focusedIndex])
+    } else if (e.key === 'Escape') {
+      setIsOpen(false)
+    }
+  }
+  
+  // Reset focused index when search changes
+  useEffect(() => {
+    setFocusedIndex(-1)
+  }, [search])
 
   return (
     <>
@@ -94,6 +126,7 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-3 py-2 text-xs sm:text-sm bg-background border border-input rounded-md hover:bg-accent hover:text-accent-foreground transition-colors"
       >
+        <img src={CHAIN_CONFIGS[selectedChain].logoUrl} alt="" className="w-4 h-4 rounded-full shadow-md" />
         <span className="truncate max-w-[120px]">{selectedConfig.name}</span>
         <ChevronDown className="w-4 h-4 shrink-0" />
       </button>
@@ -101,11 +134,11 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
       {showDropdown && createPortal(
         <div 
           ref={dropdownRef}
-          className="fixed w-64 bg-background/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl z-[9999] overflow-hidden"
+          className="fixed w-64 bg-[#0a0a0a] backdrop-blur-2xl border-2 border-white/20 rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.8)] z-[9999] overflow-hidden ring-1 ring-white/10"
           style={{ top: `${dropdownPosition.top}px`, left: `${dropdownPosition.left}px` }}
         >
           {/* Search */}
-          <div className="p-2 border-b border-border bg-background/50">
+          <div className="p-2 border-b border-white/10 bg-[#0a0a0a]/95">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
@@ -113,6 +146,7 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
                 placeholder="Search networks..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={handleKeyDown}
                 className="w-full pl-8 pr-3 py-2 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
                 autoFocus
               />
@@ -126,16 +160,23 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
                 <div className="px-3 py-2 text-xs font-semibold text-muted-foreground bg-muted/50">
                   Mainnets
                 </div>
-                {filteredMainnets.map((key) => {
+                {filteredMainnets.map((key, idx) => {
                   const config = getChainConfig(key)
+                  const chainConfig = CHAIN_CONFIGS[key]
+                  const isFocused = focusedIndex === idx
                   return (
                     <button
                       key={key}
                       onClick={() => handleSelect(key)}
-                      className={`w-full px-3 py-2 text-sm text-left hover:bg-accent hover:text-accent-foreground transition-colors ${
-                        selectedChain === key ? 'bg-accent text-accent-foreground' : ''
+                      className={`w-full px-3 py-2 text-sm text-left transition-colors flex items-center gap-2 ${
+                        selectedChain === key 
+                          ? 'bg-accent text-accent-foreground' 
+                          : isFocused 
+                            ? 'bg-accent/50 hover:bg-accent/70' 
+                            : 'hover:bg-accent/50'
                       }`}
                     >
+                      <img src={chainConfig.logoUrl} alt="" className="w-5 h-5 rounded-full shadow-md" />
                       {config.name}
                     </button>
                   )
@@ -148,16 +189,24 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
                 <div className="px-3 py-2 text-xs font-semibold text-muted-foreground bg-muted/50">
                   Testnets
                 </div>
-                {filteredTestnets.map((key) => {
+                {filteredTestnets.map((key, idx) => {
                   const config = getChainConfig(key)
+                  const chainConfig = CHAIN_CONFIGS[key]
+                  const globalIdx = filteredMainnets.length + idx
+                  const isFocused = focusedIndex === globalIdx
                   return (
                     <button
                       key={key}
                       onClick={() => handleSelect(key)}
-                      className={`w-full px-3 py-2 text-sm text-left hover:bg-accent hover:text-accent-foreground transition-colors ${
-                        selectedChain === key ? 'bg-accent text-accent-foreground' : ''
+                      className={`w-full px-3 py-2 text-sm text-left transition-colors flex items-center gap-2 ${
+                        selectedChain === key 
+                          ? 'bg-accent text-accent-foreground' 
+                          : isFocused 
+                            ? 'bg-accent/50 hover:bg-accent/70' 
+                            : 'hover:bg-accent/50'
                       }`}
                     >
+                      <img src={chainConfig.logoUrl} alt="" className="w-5 h-5 rounded-full shadow-md" />
                       {config.name}
                     </button>
                   )

@@ -13,25 +13,26 @@ export interface ChainConfig {
   key: string
   category: 'mainnet' | 'testnet'
   scanningSupported: boolean
+  logoUrl: string
 }
 
 // Centralized chain configuration - single source of truth
 export const SUPPORTED_CHAINS: ChainConfig[] = [
-  // Mainnets
-  { chain: mainnet, key: 'mainnet', category: 'mainnet', scanningSupported: true },
-  { chain: base, key: 'base', category: 'mainnet', scanningSupported: true },
-  { chain: optimism, key: 'optimism', category: 'mainnet', scanningSupported: true },
-  { chain: arbitrum, key: 'arbitrum', category: 'mainnet', scanningSupported: true },
-  { chain: polygon, key: 'polygon', category: 'mainnet', scanningSupported: true },
-  { chain: bsc, key: 'bsc', category: 'mainnet', scanningSupported: true },
+  // Mainnets - using icons.llamao.fi which supports CORS
+  { chain: mainnet, key: 'mainnet', category: 'mainnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_ethereum.jpg' },
+  { chain: base, key: 'base', category: 'mainnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_base.jpg' },
+  { chain: optimism, key: 'optimism', category: 'mainnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_optimism.jpg' },
+  { chain: arbitrum, key: 'arbitrum', category: 'mainnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_arbitrum.jpg' },
+  { chain: polygon, key: 'polygon', category: 'mainnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_polygon.jpg' },
+  { chain: bsc, key: 'bsc', category: 'mainnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_binance.jpg' },
   
   // Testnets
-  { chain: sepolia, key: 'sepolia', category: 'testnet', scanningSupported: true },
-  { chain: baseSepolia, key: 'base-sepolia', category: 'testnet', scanningSupported: true },
-  { chain: optimismSepolia, key: 'optimism-sepolia', category: 'testnet', scanningSupported: true },
-  { chain: arbitrumSepolia, key: 'arbitrum-sepolia', category: 'testnet', scanningSupported: true },
-  { chain: polygonAmoy, key: 'polygon-amoy', category: 'testnet', scanningSupported: true },
-  { chain: bscTestnet, key: 'bsc-testnet', category: 'testnet', scanningSupported: true },
+  { chain: sepolia, key: 'sepolia', category: 'testnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_ethereum.jpg' },
+  { chain: baseSepolia, key: 'base-sepolia', category: 'testnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_base.jpg' },
+  { chain: optimismSepolia, key: 'optimism-sepolia', category: 'testnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_optimism.jpg' },
+  { chain: arbitrumSepolia, key: 'arbitrum-sepolia', category: 'testnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_arbitrum.jpg' },
+  { chain: polygonAmoy, key: 'polygon-amoy', category: 'testnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_polygon.jpg' },
+  { chain: bscTestnet, key: 'bsc-testnet', category: 'testnet', scanningSupported: true, logoUrl: 'https://icons.llamao.fi/icons/chains/rsz_binance.jpg' },
 ]
 
 // Type for chain keys
