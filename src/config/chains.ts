@@ -51,7 +51,7 @@ export const getChainConfigById = (chainId: number): ChainConfig | undefined => 
 
 // Helper: Get HyperSync endpoint for a chain
 export const getHypersyncEndpoint = (key: SupportedChainKey, isDev: boolean): string => {
-  const config = getChainConfig(key)
+  // const config = getChainConfig(key) // Not needed for endpoint generation
   
   // In production, use serverless function
   if (!isDev) {

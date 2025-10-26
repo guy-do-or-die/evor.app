@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { type Chain } from 'viem/chains'
 import { 
   SUPPORTED_CHAINS, 
-  getChainConfig as getCentralChainConfig, 
   getChainConfigById,
   getHypersyncEndpoint as getHypersyncEndpointHelper,
   type SupportedChainKey 

@@ -18,7 +18,7 @@ export default function EvorappLogo({ className = "", size = "md" }: EvorappLogo
     "#f97316", // p - orange
     "#f59e0b", // p - amber
     "#10b981", // r - green
-    "#06b6d4", // o - cyan
+    "#06b6d4", // ↺ - cyan
     "#3b82f6", // v - blue
     "#8b5cf6", // e - purple
   ]
@@ -30,7 +30,7 @@ export default function EvorappLogo({ className = "", size = "md" }: EvorappLogo
           {["a", "p", "p", "r", "o", "v", "e"].map((letter, i) => (
             <span 
               key={i} 
-              className="letter letter-animate" 
+              className={`letter letter-animate ${i === 3 ? "letter-compact" : ""} ${i === 4 ? "letter-closer" : ""}`}
               style={{ 
                 '--target-color': letterColors[i]
               } as React.CSSProperties}
@@ -40,8 +40,12 @@ export default function EvorappLogo({ className = "", size = "md" }: EvorappLogo
           ))}
         </div>
         <div className="face back">
-          {["e", "v", "o", "r"].map((letter, i) => (
-            <span key={i} className="letter" style={{ color: letterColors[6 - i] }}>
+          {["e", "v", "↺", "r"].map((letter, i) => (
+            <span 
+              key={i} 
+              className={`letter ${i === 3 ? "letter-spaced" : ""}`}
+              style={{ color: letterColors[6 - i] }}
+            >
               {letter}
             </span>
           ))}

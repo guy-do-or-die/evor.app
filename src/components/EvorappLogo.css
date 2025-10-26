@@ -1,5 +1,14 @@
+@font-face {
+  font-family: 'TASA Orbiter Text';
+  src: url('/fonts/TASAOrbiterText-Bold.woff2') format('woff2'),
+       url('/fonts/TASAOrbiterText-Bold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 .word-container {
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Droid Sans Mono', monospace;
+  font-family: 'TASA Orbiter Text', 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Droid Sans Mono', monospace;
   font-weight: 700;
   line-height: 1;
   position: relative;
@@ -38,6 +47,19 @@
   text-shadow: 0 0 4px currentColor, 0 0 8px currentColor;
 }
 
+.letter-spaced {
+  margin-left: 0.25ch;
+}
+
+.letter-compact {
+  margin-left: -0.05ch;
+  margin-right: -0.05ch;
+}
+
+.letter-closer {
+  margin-left: -0.08ch;
+}
+
 .letter-animate {
   animation: color-transition 8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
@@ -66,7 +88,8 @@
   width: 3ch;
   height: 100%;
   transform-style: preserve-3d;
-  animation: sub-flip 8s cubic-bezier(0.22, 1, 0.36, 1) infinite
+  animation: sub-flip 8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  margin-left: -0.05ch;
 }
 
 @keyframes main-flip {

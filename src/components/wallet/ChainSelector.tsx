@@ -16,6 +16,7 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
   const dropdownRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
+  const [showDropdown, setShowDropdown] = useState(false)
 
   const selectedConfig = getChainConfig(selectedChain)
 
@@ -35,11 +36,15 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
         })
       } else {
         // On desktop: align to button's right edge
-      setDropdownPosition({
-        top: rect.bottom + 4,
+        setDropdownPosition({
+          top: rect.bottom + 4,
           left: rect.right - 256 // w-64 = 256px
-      })
-    }
+        })
+      }
+      // Show dropdown after position is calculated
+      setShowDropdown(true)
+    } else {
+      setShowDropdown(false)
     }
   }, [isOpen])
 
@@ -93,7 +98,7 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
         <ChevronDown className="w-4 h-4 shrink-0" />
       </button>
 
-      {isOpen && createPortal(
+      {showDropdown && createPortal(
         <div 
           ref={dropdownRef}
           className="fixed w-64 bg-background/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl z-[9999] overflow-hidden"

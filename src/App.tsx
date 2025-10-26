@@ -16,8 +16,8 @@ import './components/SnapEnhance.css'
 // EvorDelegate addresses per network
 const EVOR_DELEGATES = {
   8453: '0xbdf5ec7f3d3bbe67bc5fe8232c495a5159df87bc', // Base Mainnet (old - needs redeployment)
-  84532: '0x81bacfd7401e69328c0aa6501757e5e4137f0b14', // Base Sepolia (PRODUCTION - clean)
-  11155111: '0xd9ee9b61071b339ac3ae5a86eb139a1f36ab6b23', // Ethereum Sepolia (PRODUCTION - clean)
+  84532: '0x81bacfd7401e69328c0aa6501757e5e4137f0b14', // Base Sepolia (PRODUCTION - clean, verified)
+  11155111: '0xd9ee9b61071b339ac3ae5a86eb139a1f36ab6b23', // Ethereum Sepolia (PRODUCTION - clean, verified)
 } as const
 
 function App() {

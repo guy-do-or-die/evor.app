@@ -1,8 +1,10 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox-viem";
+import hardhatVerify from "@nomicfoundation/hardhat-verify";
 import "dotenv/config";
 
 const config: HardhatUserConfig = {
+  plugins: [hardhatVerify],
   solidity: {
     version: "0.8.24",
     settings: {
@@ -37,6 +39,11 @@ const config: HardhatUserConfig = {
     tests: "./test",
     cache: "./cache",
     artifacts: "./artifacts",
+  },
+  verify: {
+    etherscan: {
+      apiKey: "QU7HJKEPS3D6AYFBVCPIBEA78UUN53D91A",
+    },
   },
 };
 
