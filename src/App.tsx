@@ -129,6 +129,10 @@ function App() {
           nonce: Number(nonce),
           ...sig,
         }
+        
+        // Small delay to let Rabby clear the first signature popup
+        setStatus('✅ Authorization signed, preparing transaction...')
+        await new Promise(resolve => setTimeout(resolve, 500))
       } else {
         setStatus('✅ Already delegated, skipping authorization...')
       }
@@ -217,10 +221,10 @@ function App() {
           setSnapEffect(true)
           
           Thanos.snap(approvalsRef.current, {
-            duration: 2,
+            duration: 3,
             direction: 'up',
-            randomness: 0.3,
-            particleDensity: 10,
+            randomness: 0.5,
+            particleDensity: 5,
             onComplete: () => {
               setSnapEffect(false)
               setApprovals([])
