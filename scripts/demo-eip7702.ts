@@ -11,7 +11,7 @@ import "dotenv/config";
  * token approvals by temporarily delegating the EOA to a smart contract.
  */
 
-const EVOR_DELEGATE = "0x430cae04bdfc596be0ca98b46279c3babf080620" as const;
+const EVOR_DELEGATE = "0xefa7e04f73321a5d585de268a7846932e3d3ee42" as const; // WORKING
 const TEST_TOKEN = "0x3f1bfb16a75277d5826d195506b011a79fd9626e" as const;
 const SPENDER = "0x1111111111111111111111111111111111111111" as const;
 

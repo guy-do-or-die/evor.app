@@ -44,10 +44,15 @@ async function main() {
     readFileSync(join(__dirname, "../artifacts/contracts/EvorDelegate.sol/EvorDelegate.json"), "utf8")
   );
 
+  // Support address for tips
+  const supportAddress = "0x830bc5551e429DDbc4E9Ac78436f8Bf13Eca8434" as `0x${string}`;
+  console.log("Support address:", supportAddress);
+
   console.log("\n🚀 Deploying EvorDelegate...");
   const hash = await walletClient.deployContract({
     abi: artifact.abi,
     bytecode: artifact.bytecode as `0x${string}`,
+    args: [supportAddress],
   });
 
   console.log("Deploy tx:", hash);

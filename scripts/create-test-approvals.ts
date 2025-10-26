@@ -1,9 +1,23 @@
-import { createWalletClient, http, createPublicClient, parseAbi } from "viem";
-import { baseSepolia } from "viem/chains";
+import { createWalletClient, http, createPublicClient, parseAbi, type Chain } from "viem";
+import { baseSepolia, sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import "dotenv/config";
 
-const TEST_TOKEN = "0x3f1bfb16a75277d5826d195506b011a79fd9626e" as const;
+// Chain configurations
+const CHAIN_CONFIGS = {
+  'base-sepolia': {
+    chain: baseSepolia,
+    rpcUrl: process.env.BASE_SEPOLIA_RPC!,
+    testToken: "0x3f1bfb16a75277d5826d195506b011a79fd9626e", // Existing test token
+  },
+  'sepolia': {
+    chain: sepolia,
+    rpcUrl: process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com",
+    testToken: "0x16f9d3a02aed2f4b035680adae7a2d478c88e366", // Deployed TestERC20
+  },
+} as const;
+
+type SupportedChain = keyof typeof CHAIN_CONFIGS;
 // Random addresses to use as spenders
 const SPENDERS = [
   "0x1111111111111111111111111111111111111111",
@@ -17,19 +31,31 @@ const SPENDERS = [
 ] as const;
 
 async function main() {
-  console.log("Creating test approvals...\n");
+  // Get chain from command line argument (e.g., --chain=sepolia)
+  const chainArg = process.argv.find(arg => arg.startsWith('--chain='))?.split('=')[1] || 'base-sepolia';
+  
+  if (!(chainArg in CHAIN_CONFIGS)) {
+    console.error(`❌ Unsupported chain: ${chainArg}`);
+    console.error(`Supported chains: ${Object.keys(CHAIN_CONFIGS).join(', ')}`);
+    process.exit(1);
+  }
+  
+  const chainKey = chainArg as SupportedChain;
+  const config = CHAIN_CONFIGS[chainKey];
+  
+  console.log(`Creating test approvals on ${config.chain.name}...\n`);
 
   const account = privateKeyToAccount(process.env.DEMO_EOA_PK as `0x${string}`);
-  const transport = http(process.env.BASE_SEPOLIA_RPC);
+  const transport = http(config.rpcUrl);
 
   const walletClient = createWalletClient({
     account,
-    chain: baseSepolia,
+    chain: config.chain,
     transport,
   });
 
   const publicClient = createPublicClient({
-    chain: baseSepolia,
+    chain: config.chain,
     transport,
   });
 
@@ -38,8 +64,9 @@ async function main() {
     "function allowance(address owner, address spender) external view returns (uint256)",
   ]);
 
+  console.log(`Chain: ${config.chain.name} (${config.chain.id})`);
   console.log(`Account: ${account.address}`);
-  console.log(`Token: ${TEST_TOKEN}`);
+  console.log(`Token: ${config.testToken}`);
   console.log(`Creating ${SPENDERS.length} approvals...\n`);
 
   // Create approvals for all spenders (one at a time with fresh nonces)
@@ -57,7 +84,7 @@ async function main() {
       });
       
       const hash = await walletClient.writeContract({
-        address: TEST_TOKEN,
+        address: config.testToken as `0x${string}`,
         abi: erc20Abi,
         functionName: "approve",
         args: [spender, amount],
@@ -76,7 +103,7 @@ async function main() {
   console.log("📊 Current allowances:");
   for (const spender of SPENDERS) {
     const allowance = await publicClient.readContract({
-      address: TEST_TOKEN,
+      address: config.testToken as `0x${string}`,
       abi: erc20Abi,
       functionName: "allowance",
       args: [account.address, spender],

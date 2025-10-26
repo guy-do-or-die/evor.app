@@ -97,7 +97,7 @@ export function ChainSelector({ selectedChain, onChainChange }: ChainSelectorPro
         <div 
           ref={dropdownRef}
           className="fixed w-64 bg-background/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl z-[9999] overflow-hidden"
-          style={{ top: `${dropdownPosition.top}px`, right: `${dropdownPosition.right}px` }}
+          style={{ top: `${dropdownPosition.top}px`, left: `${dropdownPosition.left}px` }}
         >
           {/* Search */}
           <div className="p-2 border-b border-border bg-background/50">

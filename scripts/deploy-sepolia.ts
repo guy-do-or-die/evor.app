@@ -53,6 +53,7 @@ async function main() {
   const tokenHash = await walletClient.deployContract({
     abi: tokenArtifact.abi,
     bytecode: tokenArtifact.bytecode as `0x${string}`,
+    args: [],
   });
 
   console.log("Deploy tx:", tokenHash);

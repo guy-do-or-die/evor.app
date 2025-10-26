@@ -17,7 +17,8 @@
     "test:deploy-nfts": "hardhat run scripts/deploy-test-nfts.ts --network baseSepolia",
     "test:deploy-nft": "hardhat run scripts/deploy-single-nft.ts --network baseSepolia",
     "test:deploy-1155": "hardhat run scripts/deploy-erc1155.ts --network baseSepolia",
-    "test:create-approvals": "hardhat run scripts/create-test-approvals.ts --network baseSepolia",
+    "test:create-approvals": "tsx scripts/create-test-approvals.ts --chain=base-sepolia",
+    "test:create-approvals:sepolia": "tsx scripts/create-test-approvals.ts --chain=sepolia",
     "test:create-all": "hardhat run scripts/create-test-approvals-comprehensive.ts --network baseSepolia",
     "test:create-permit2": "hardhat run scripts/create-permit2-approval.ts --network baseSepolia",
     "test:check-approvals": "tsx scripts/check-approvals.ts --network baseSepolia",
@@ -28,6 +29,7 @@
     "test:sepolia": "hardhat run scripts/test-sepolia-7702.ts --network sepolia"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
     "@tanstack/react-query": "^5.90.5",
     "abitype": "^1.1.1",
     "class-variance-authority": "^0.7.1",

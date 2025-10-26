@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAccount, usePublicClient } from 'wagmi'
 import { parseAbi, type Address, hexToSignature, createWalletClient, custom } from 'viem'
 import { Thanos } from 'vanish-effect'
-import { ExternalLink, Sparkles, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react'
+import { ExternalLink, Sparkles, RefreshCw } from 'lucide-react'
 import EvorappLogo from './components/EvorappLogo'
 import { WalletConnection } from './components/wallet/WalletConnection'
 import { ApprovalsList } from './components/approvals/ApprovalsList'
@@ -15,9 +15,9 @@ import './components/SnapEnhance.css'
 
 // EvorDelegate addresses per network
 const EVOR_DELEGATES = {
-  8453: '0x0b515dec9f25c46a047c4819f0119ec77e3765ce', // Base Mainnet
-  84532: '0x430cae04bdfc596be0ca98b46279c3babf080620', // Base Sepolia
-  11155111: '0x430cae04bdfc596be0ca98b46279c3babf080620', // Sepolia (placeholder)
+  8453: '0xbdf5ec7f3d3bbe67bc5fe8232c495a5159df87bc', // Base Mainnet (old - needs redeployment)
+  84532: '0x81bacfd7401e69328c0aa6501757e5e4137f0b14', // Base Sepolia (PRODUCTION - clean)
+  11155111: '0xd9ee9b61071b339ac3ae5a86eb139a1f36ab6b23', // Ethereum Sepolia (PRODUCTION - clean)
 } as const
 
 function App() {
@@ -31,8 +31,6 @@ function App() {
   const [txHash, setTxHash] = useState('')
   const [loading, setLoading] = useState(false)
   const [clearDelegationAfter, setClearDelegationAfter] = useState(true)
-  const [enableSupport, setEnableSupport] = useState(true)
-  const [ethSupport, setEthSupport] = useState('0.0001')
   const [snapEffect, setSnapEffect] = useState(false)
   const approvalsRef = useRef<HTMLDivElement>(null)
 
@@ -69,57 +67,70 @@ function App() {
     }
     
     setLoading(true)
-    setStatus('Signing EIP-7702 authorization...')
+    setStatus('Checking delegation status...')
     setTxHash('')
     
     try {
-      const nonce = await publicClient!.getTransactionCount({ address })
-      
-      // Create EIP-7702 authorization
       // Get the correct EvorDelegate address for this network
       const evorDelegate = EVOR_DELEGATES[chainConfig.chainId as keyof typeof EVOR_DELEGATES]
       if (!evorDelegate) {
         throw new Error(`EvorDelegate not deployed on chain ${chainConfig.chainId}`)
       }
 
-      const typedData = {
-        types: {
-          EIP712Domain: [
-            { name: 'name', type: 'string' },
-            { name: 'version', type: 'string' },
-            { name: 'chainId', type: 'uint256' },
-          ],
-          Authorization: [
-            { name: 'chainId', type: 'uint256' },
-            { name: 'address', type: 'address' },
-            { name: 'nonce', type: 'uint64' },
-          ],
-        },
-        primaryType: 'Authorization' as const,
-        domain: {
-          name: 'EIP-7702',
-          version: '1',
-          chainId: chainConfig.chainId,
-        },
-        message: {
+      // Check if EOA is already delegated to the correct contract
+      const existingCode = await publicClient!.getCode({ address })
+      const expectedCode = await publicClient!.getCode({ address: evorDelegate })
+      const alreadyDelegated = existingCode === expectedCode && existingCode !== undefined && existingCode !== '0x'
+      
+      let authorization
+      
+      if (!alreadyDelegated) {
+        // Need to create new EIP-7702 authorization
+        setStatus('Signing EIP-7702 authorization...')
+        
+        const nonce = await publicClient!.getTransactionCount({ address })
+        
+        const typedData = {
+          types: {
+            EIP712Domain: [
+              { name: 'name', type: 'string' },
+              { name: 'version', type: 'string' },
+              { name: 'chainId', type: 'uint256' },
+            ],
+            Authorization: [
+              { name: 'chainId', type: 'uint256' },
+              { name: 'address', type: 'address' },
+              { name: 'nonce', type: 'uint64' },
+            ],
+          },
+          primaryType: 'Authorization' as const,
+          domain: {
+            name: 'EIP-7702',
+            version: '1',
+            chainId: chainConfig.chainId,
+          },
+          message: {
+            chainId: chainConfig.chainId,
+            address: evorDelegate,
+            nonce: Number(nonce),
+          },
+        }
+        
+        setStatus('Please sign the authorization...')
+        const signature = await window.ethereum.request({
+          method: 'eth_signTypedData_v4',
+          params: [address, JSON.stringify(typedData)],
+        })
+        
+        const sig = hexToSignature(signature)
+        authorization = {
           chainId: chainConfig.chainId,
           address: evorDelegate,
           nonce: Number(nonce),
-        },
-      }
-      
-      setStatus('Please sign the authorization...')
-      const signature = await window.ethereum.request({
-        method: 'eth_signTypedData_v4',
-        params: [address, JSON.stringify(typedData)],
-      })
-      
-      const sig = hexToSignature(signature)
-      const authorization = {
-        chainId: chainConfig.chainId,
-        address: evorDelegate,
-        nonce: Number(nonce),
-        ...sig,
+          ...sig,
+        }
+      } else {
+        setStatus('✅ Already delegated, skipping authorization...')
       }
       
       setStatus('Sending revoke transaction...')
@@ -136,102 +147,58 @@ function App() {
       const evorAbi = parseAbi([
         'function revokeERC20(address[] tokens, address[] spenders) external',
         'function revokeForAll(address[] collections, address[] operators) external',
+        'function revokeAll(address[] tokens, address[] spenders, address[] collections, address[] operators) external',
       ])
       
       let hash: Address
       
-      // Revoke based on what types we have
-      if (erc20Approvals.length > 0 && nftApprovals.length === 0) {
+      // Prepare arrays
+      const tokens = erc20Approvals.map(p => p.token as Address)
+      const spenders = erc20Approvals.map(p => p.spender as Address)
+      const collections = nftApprovals.map(p => p.token as Address)
+      const operators = nftApprovals.map(p => p.spender as Address)
+      
+      // Determine which function to call based on approval types
+      let functionName: 'revokeAll' | 'revokeERC20' | 'revokeForAll'
+      let args: Address[][]
+      let statusText: string
+      
+      if (erc20Approvals.length > 0 && nftApprovals.length > 0) {
+        // Both types - use revokeAll for maximum efficiency!
+        functionName = 'revokeAll'
+        args = [tokens, spenders, collections, operators]
+        statusText = `Sign to revoke ${approvals.length} approvals in one transaction!`
+      } else if (erc20Approvals.length > 0) {
         // Only ERC20
-        const tokens = erc20Approvals.map(p => p.token as Address)
-        const spenders = erc20Approvals.map(p => p.spender as Address)
-        
-        setStatus(`⚠️ Sign to revoke ${erc20Approvals.length} token approvals (wallet may show "Cancel Pending Transaction" - this is expected for EIP-7702)`)
-        
-        hash = await client.writeContract({
-          account: address,
-          abi: evorAbi,
-          address: address,
-          authorizationList: [authorization],
-          functionName: 'revokeERC20',
-          args: [tokens, spenders],
-        })
-      } else if (nftApprovals.length > 0 && erc20Approvals.length === 0) {
-        // Only NFTs
-        const collections = nftApprovals.map(p => p.token as Address)
-        const operators = nftApprovals.map(p => p.spender as Address)
-        
-        setStatus(`⚠️ Sign to revoke ${nftApprovals.length} NFT approvals (wallet may show "Cancel Pending Transaction" - this is expected for EIP-7702)`)
-        
-        hash = await client.writeContract({
-          account: address,
-          abi: evorAbi,
-          address: address,
-          authorizationList: [authorization],
-          functionName: 'revokeForAll',
-          args: [collections, operators],
-        })
+        functionName = 'revokeERC20'
+        args = [tokens, spenders]
+        statusText = `Sign to revoke ${erc20Approvals.length} token approvals`
       } else {
-        // Mixed - revoke ERC20 first, then NFTs with a new authorization
-        setStatus(`⚠️ Sign to revoke ${erc20Approvals.length} token approvals (1/2 - wallet may show "Cancel Pending Transaction" - this is expected)`)
-        
-        const tokens = erc20Approvals.map(p => p.token as Address)
-        const spenders = erc20Approvals.map(p => p.spender as Address)
-        
-        const erc20Hash = await client.writeContract({
-          account: address,
-          abi: evorAbi,
-          address: address,
-          authorizationList: [authorization],
-          functionName: 'revokeERC20',
-          args: [tokens, spenders],
-        })
-        
-        setStatus('Waiting for ERC20 revocation...')
-        if (publicClient) {
-          await publicClient.waitForTransactionReceipt({ hash: erc20Hash })
-        }
-        
-        // Sign a new authorization for NFT revocation (new nonce)
-        setStatus('Signing authorization for NFT revocation...')
-        const nonce2 = await publicClient!.getTransactionCount({ address })
-        
-        const typedData2 = {
-          ...typedData,
-          message: {
-            chainId: chainConfig.chainId,
-            address: evorDelegate,
-            nonce: Number(nonce2),
-          },
-        }
-        
-        const signature2 = await window.ethereum.request({
-          method: 'eth_signTypedData_v4',
-          params: [address, JSON.stringify(typedData2)],
-        })
-        
-        const sig2 = hexToSignature(signature2 as `0x${string}`)
-        const authorization2 = {
-          chainId: chainConfig.chainId,
-          address: evorDelegate,
-          nonce: Number(nonce2),
-          ...sig2,
-        }
-        
-        setStatus(`⚠️ Sign to revoke ${nftApprovals.length} NFT approvals (2/2 - wallet may show "Cancel Pending Transaction" - this is expected)`)
-        
-        const collections = nftApprovals.map(p => p.token as Address)
-        const operators = nftApprovals.map(p => p.spender as Address)
-        
-        hash = await client.writeContract({
-          account: address,
-          abi: evorAbi,
-          address: address,
-          authorizationList: [authorization2],
-          functionName: 'revokeForAll',
-          args: [collections, operators],
-        })
+        // Only NFTs
+        functionName = 'revokeForAll'
+        args = [collections, operators]
+        statusText = `Sign to revoke ${nftApprovals.length} NFT approvals`
       }
+      
+      setStatus(`⚠️ ${statusText}`)
+      
+      // Debug logging
+      console.log('Transaction params:', {
+        functionName,
+        args,
+        erc20Count: erc20Approvals.length,
+        nftCount: nftApprovals.length,
+        alreadyDelegated: !authorization,
+      })
+      
+      hash = await client.writeContract({
+        account: address,
+        abi: evorAbi,
+        address: address,
+        ...(authorization && { authorizationList: [authorization] }),
+        functionName,
+        args,
+      } as any)
       
       setTxHash(hash)
       setStatus('Waiting for confirmation...')
@@ -252,7 +219,7 @@ function App() {
           Thanos.snap(approvalsRef.current, {
             duration: 2,
             direction: 'up',
-            randomness: 0.95,
+            randomness: 0.3,
             particleDensity: 10,
             onComplete: () => {
               setSnapEffect(false)
@@ -283,7 +250,27 @@ function App() {
       }
     } catch (error: any) {
       console.error('Error revoking:', error)
-      setStatus(`❌ ${error.shortMessage || error.message || 'Unknown error'}`)
+      
+      // Try to extract more detailed error info
+      let errorMsg = error.shortMessage || error.message || 'Unknown error'
+      
+      if (error.cause?.reason) {
+        errorMsg = error.cause.reason
+      } else if (error.cause?.data?.message) {
+        errorMsg = error.cause.data.message
+      } else if (error.details) {
+        errorMsg = error.details
+      }
+      
+      console.error('Detailed error:', {
+        message: error.message,
+        shortMessage: error.shortMessage,
+        details: error.details,
+        cause: error.cause,
+        data: error.data,
+      })
+      
+      setStatus(`❌ ${errorMsg}`)
     } finally {
       setLoading(false)
     }
@@ -331,7 +318,7 @@ function App() {
     const clearAuthorization = {
       chainId,
       address: '0x0000000000000000000000000000000000000000' as Address,
-      nonce,
+      nonce: Number(nonce),
       ...sig,
     }
     
@@ -350,8 +337,10 @@ function App() {
       <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 md:py-12 max-w-2xl">
         {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
-          <div className="flex justify-center mb-4 sm:mb-6 scale-75 sm:scale-90 md:scale-100">
-            <EvorappLogo size="lg" />
+          <div className="flex justify-center items-center mb-4 sm:mb-6">
+            <div className="scale-[0.6] sm:scale-90 md:scale-100 lg:scale-110 origin-center">
+              <EvorappLogo size="lg" />
+            </div>
           </div>
           <p className="text-sm sm:text-base md:text-lg font-medium bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 text-transparent bg-clip-text animate-glow-subtle">
             Evor-porate all approvals in one click
@@ -423,8 +412,8 @@ function App() {
 
                   {/* Settings */}
                   <Card className="p-3 bg-muted/50">
-                    <div className="space-y-2.5">
-                      <div className="flex items-center gap-3">
+                    <div className="flex flex-col md:flex-row flex-wrap gap-x-6 gap-y-2.5 md:justify-between">
+                      <div className="flex items-center gap-1.5 sm:gap-3">
                         <Checkbox
                           id="clearDelegation"
                           checked={clearDelegationAfter}
@@ -433,77 +422,6 @@ function App() {
                         <label htmlFor="clearDelegation" className="text-xs sm:text-sm cursor-pointer">
                           Clear delegation after revocation
                         </label>
-                      </div>
-                      
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          id="enableSupport"
-                          checked={enableSupport}
-                          onChange={(e) => setEnableSupport(e.target.checked)}
-                        />
-                        <label htmlFor="enableSupport" className="text-xs sm:text-sm cursor-pointer">
-                          Support the project:
-                        </label>
-                        
-                        {enableSupport && (
-                          <div className="relative inline-flex items-center h-7">
-                            <input
-                              type="text"
-                              value={ethSupport}
-                              onChange={(e) => {
-                                const val = e.target.value
-                                if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                                  setEthSupport(val)
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'ArrowUp') {
-                                  e.preventDefault()
-                                  const current = parseFloat(ethSupport) || 0
-                                  setEthSupport((current + 0.0001).toFixed(4))
-                                } else if (e.key === 'ArrowDown') {
-                                  e.preventDefault()
-                                  const current = parseFloat(ethSupport) || 0
-                                  setEthSupport(Math.max(0, current - 0.0001).toFixed(4))
-                                }
-                              }}
-                              onBlur={() => {
-                                const num = parseFloat(ethSupport)
-                                if (isNaN(num) || num < 0) {
-                                  setEthSupport('0.0001')
-                                } else {
-                                  setEthSupport(num.toFixed(4))
-                                }
-                              }}
-                              className="h-7 w-[90px] rounded-md border border-input bg-background pl-2 pr-[38px] text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                            <div className="absolute right-[17px] flex items-center gap-1 pointer-events-none">
-                              <span className="text-[11px] text-muted-foreground font-medium">ETH</span>
-                            </div>
-                            <div className="absolute right-0 top-0 flex flex-col h-7 pointer-events-auto">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const current = parseFloat(ethSupport) || 0
-                                  setEthSupport((current + 0.0001).toFixed(4))
-                                }}
-                                className="h-[14px] w-[14px] flex items-center justify-center border border-input border-b-0 rounded-tr-md bg-background hover:bg-accent/50 transition-colors"
-                              >
-                                <ChevronUp className="h-2.5 w-2.5 text-muted-foreground" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const current = parseFloat(ethSupport) || 0
-                                  setEthSupport(Math.max(0, current - 0.0001).toFixed(4))
-                                }}
-                                className="h-[14px] w-[14px] flex items-center justify-center border border-input rounded-br-md bg-background hover:bg-accent/50 transition-colors"
-                              >
-                                <ChevronDown className="h-2.5 w-2.5 text-muted-foreground" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
                   </Card>
