@@ -230,10 +230,8 @@ MIT License - see LICENSE file
 
 ## 🔗 Links
 
-- **Live App**: [evor.app](https://evor.app) (coming soon)
+- **Live App**: [evor.app](https://evor.app)
 - **Contract**: [View on BaseScan](https://basescan.org/address/0xbdf5ec7f3d3bbe67bc5fe8232c495a5159df87bc)
-- **Docs**: [DEPLOYMENT.md](./DEPLOYMENT.md)
-- **Security**: [BUGFIX.md](./BUGFIX.md)
 
 ---
 
